@@ -1,0 +1,248 @@
+name: Build and scan image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - renovate.json
+      - README.md
+      - LICENSE
+      - .github/workflows/**
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/home-ops/paperless-ngx
+  TRIVY_SCANNERS: vuln
+  TRIVY_SEVERITY: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
+  TRIVY_TIMEOUT: 10m
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare reports directory
+        shell: bash
+        run: mkdir -p reports
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image references
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_ref="$(sed -nE 's/^FROM (ghcr\.io\/paperless-ngx\/paperless-ngx:[^@ ]+@sha256:[0-9a-f]+).*/\1/p' Dockerfile)"
+          upstream_version="$(sed -nE 's/^FROM ghcr\.io\/paperless-ngx\/paperless-ngx:([^@ ]+)@sha256:.*/\1/p' Dockerfile)"
+          if [[ -z "$upstream_ref" || -z "$upstream_version" ]]; then
+            echo 'Could not derive pinned upstream reference from Dockerfile' >&2
+            exit 1
+          fi
+          if [[ ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'GITHUB_SHA must be exactly 40 lowercase hexadecimal characters' >&2
+            exit 1
+          fi
+          immutable_tag="${upstream_version}-$(date -u +%Y%m%d)-${GITHUB_SHA}"
+          {
+            echo "UPSTREAM_REF=$upstream_ref"
+            echo "IMMUTABLE_REF=${IMAGE}:${immutable_tag}"
+          } >> "$GITHUB_ENV"
+          {
+            echo "### Image references"
+            echo "- Upstream: \`$upstream_ref\`"
+            echo "- Immutable: \`${IMAGE}:${immutable_tag}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reject existing immutable tag
+        shell: bash
+        # This check is advisory only. Registry-side tag immutability is required
+        # to make the check-then-push sequence safe against concurrent runs.
+        run: |
+          set -euo pipefail
+          set +e
+          inspect_output="$(docker manifest inspect "$IMMUTABLE_REF" 2>&1)"
+          inspect_status=$?
+          set -e
+          if [[ $inspect_status -eq 0 ]]; then
+            echo "Immutable tag already exists: $IMMUTABLE_REF" >&2
+            exit 1
+          fi
+          if [[ "$inspect_output" == *'manifest unknown'* ||
+                "$inspect_output" == *'no such manifest'* ||
+                "$inspect_output" == *'name unknown'* ||
+                "$inspect_output" == *'404 Not Found'* ]]; then
+            echo "Immutable tag does not exist: $IMMUTABLE_REF"
+            exit 0
+          fi
+          echo 'Could not determine whether immutable tag exists:' >&2
+          printf '%s\n' "$inspect_output" >&2
+          exit 1
+
+      - name: Build and publish immutable image
+        # Configure GHCR/package tag immutability outside this workflow. A push
+        # conflict must fail here; this workflow must not overwrite an immutable tag.
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMMUTABLE_REF }}
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+
+      - name: Pull immutable image for scanning
+        run: docker pull "$IMMUTABLE_REF"
+
+      - name: Scan pinned upstream image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          trivy image \
+            --scanners "$TRIVY_SCANNERS" \
+            --severity "$TRIVY_SEVERITY" \
+            --timeout "$TRIVY_TIMEOUT" \
+            --exit-code 0 \
+            --format json \
+            --output reports/upstream.json \
+            "$UPSTREAM_REF"
+          trivy image \
+            --scanners "$TRIVY_SCANNERS" \
+            --severity "$TRIVY_SEVERITY" \
+            --timeout "$TRIVY_TIMEOUT" \
+            --exit-code 0 \
+            --format template \
+            --template $'# Trivy vulnerabilities: pinned upstream\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range .Results }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
+            --output reports/upstream.md \
+            "$UPSTREAM_REF"
+
+      - name: Scan built immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          trivy image \
+            --scanners "$TRIVY_SCANNERS" \
+            --severity "$TRIVY_SEVERITY" \
+            --timeout "$TRIVY_TIMEOUT" \
+            --exit-code 0 \
+            --format json \
+            --output reports/immutable.json \
+            "$IMMUTABLE_REF"
+          trivy image \
+            --scanners "$TRIVY_SCANNERS" \
+            --severity "$TRIVY_SEVERITY" \
+            --timeout "$TRIVY_TIMEOUT" \
+            --exit-code 0 \
+            --format template \
+            --template $'# Trivy vulnerabilities: built immutable\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range .Results }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
+            --output reports/immutable.md \
+            "$IMMUTABLE_REF"
+
+      - name: Generate vulnerability comparison
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f reports/upstream.json || ! -f reports/immutable.json ]]; then
+            exit 0
+          fi
+
+          count() {
+            jq --arg severity "$1" \
+              '[.Results[]?.Vulnerabilities[]? | select(.Severity == $severity)] | length' "$2"
+          }
+
+          {
+            echo '# Trivy vulnerability comparison'
+            echo
+            echo "Upstream reference: \`$UPSTREAM_REF\`"
+            echo "Immutable reference: \`$IMMUTABLE_REF\`"
+            echo
+            echo '| Severity | Pinned upstream | Built immutable |'
+            echo '| --- | ---: | ---: |'
+            for severity in CRITICAL HIGH MEDIUM LOW UNKNOWN; do
+              echo "| $severity | $(count "$severity" reports/upstream.json) | $(count "$severity" reports/immutable.json) |"
+            done
+          } > reports/comparison.md
+
+      - name: Write failure metadata
+        if: ${{ failure() || cancelled() }}
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          {
+            echo "workflow=$GITHUB_WORKFLOW"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "ref=$WORKFLOW_REF"
+            echo "sha=$GITHUB_SHA"
+            echo "job=build"
+            echo "status=failure-or-cancelled"
+          } > reports/failure-metadata.txt
+          ls -la reports
+
+      - name: Upload vulnerability reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-reports-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+          overwrite: true
+          compression-level: 6
+
+      - name: Add vulnerability comparison to job summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -f reports/comparison.md ]]; then
+            {
+              echo
+              echo '### Vulnerability comparison'
+              cat reports/comparison.md
+              echo
+              echo "Reports: [workflow artifacts]($RUN_URL)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Update latest after successful build and scans
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "$IMMUTABLE_REF"
