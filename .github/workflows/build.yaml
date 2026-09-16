@@ -123,10 +123,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
+          trivy_tmpdir="$RUNNER_TEMP/trivy"
+          rm -rf "$trivy_tmpdir"
+          mkdir -p "$trivy_tmpdir"
+          export TMPDIR="$trivy_tmpdir"
           trivy image \
             --scanners "$TRIVY_SCANNERS" \
             --severity "$TRIVY_SEVERITY" \
             --timeout "$TRIVY_TIMEOUT" \
+            --parallel 1 \
             --exit-code 0 \
             --format json \
             --output reports/upstream.json \
@@ -135,6 +140,7 @@ jobs:
             --scanners "$TRIVY_SCANNERS" \
             --severity "$TRIVY_SEVERITY" \
             --timeout "$TRIVY_TIMEOUT" \
+            --parallel 1 \
             --exit-code 0 \
             --format template \
             --template $'# Trivy vulnerabilities: pinned upstream\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
@@ -146,10 +152,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports
+          trivy_tmpdir="$RUNNER_TEMP/trivy"
+          rm -rf "$trivy_tmpdir"
+          mkdir -p "$trivy_tmpdir"
+          export TMPDIR="$trivy_tmpdir"
           trivy image \
             --scanners "$TRIVY_SCANNERS" \
             --severity "$TRIVY_SEVERITY" \
             --timeout "$TRIVY_TIMEOUT" \
+            --parallel 1 \
             --exit-code 0 \
             --format json \
             --output reports/immutable.json \
@@ -158,6 +169,7 @@ jobs:
             --scanners "$TRIVY_SCANNERS" \
             --severity "$TRIVY_SEVERITY" \
             --timeout "$TRIVY_TIMEOUT" \
+            --parallel 1 \
             --exit-code 0 \
             --format template \
             --template $'# Trivy vulnerabilities: built immutable\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
