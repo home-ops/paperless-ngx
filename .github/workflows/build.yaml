@@ -137,7 +137,7 @@ jobs:
             --timeout "$TRIVY_TIMEOUT" \
             --exit-code 0 \
             --format template \
-            --template $'# Trivy vulnerabilities: pinned upstream\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range .Results }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
+            --template $'# Trivy vulnerabilities: pinned upstream\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
             --output reports/upstream.md \
             "$UPSTREAM_REF"
 
@@ -160,7 +160,7 @@ jobs:
             --timeout "$TRIVY_TIMEOUT" \
             --exit-code 0 \
             --format template \
-            --template $'# Trivy vulnerabilities: built immutable\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range .Results }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
+            --template $'# Trivy vulnerabilities: built immutable\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
             --output reports/immutable.md \
             "$IMMUTABLE_REF"
 
