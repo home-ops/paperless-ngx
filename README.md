@@ -1,9 +1,11 @@
 # Paperless-ngx Image
 
-Container image wrapper for Paperless-ngx. The Dockerfile starts from the
-upstream image below and publishes a separately maintained image:
+This repository builds a maintained wrapper around the official
+[Paperless-ngx project](https://github.com/paperless-ngx/paperless-ngx). It does
+not fork or redistribute Paperless-ngx source code. The Dockerfile starts from
+the official upstream image below and publishes a separately maintained image:
 
-- Source: `ghcr.io/paperless-ngx/paperless-ngx:3.1.3`
+- Source: [`ghcr.io/paperless-ngx/paperless-ngx:3.1.3`](https://github.com/paperless-ngx/paperless-ngx)
 - Published image: `ghcr.io/home-ops/paperless-ngx`
 
 ## Why This Repository Exists
@@ -80,9 +82,11 @@ configuration:
 - **Before:** pinned upstream Paperless-ngx image.
 - **After:** newly built `ghcr.io/home-ops/paperless-ngx` image.
 
-See the [current visual Before/After report](reports/trivy.md) for latest
-severity totals, changes, image references, and scan run link. GHA regenerates
-that page after every successful scan and commits only the generated report.
+See the [current visual Before/After report](reports/trivy.md) and its
+[normalized JSON data](reports/trivy.json) for latest severity totals, changes,
+image references, and scan run link. GHA regenerates both files after every
+successful scan and commits only these compact reports. Full findings remain in
+the GHA artifact for each run.
 
 View results in the [Build and scan image workflow][workflow]:
 

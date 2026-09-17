@@ -253,6 +253,42 @@ jobs:
             echo '- `upstream.json` and `immutable.json`: raw Trivy output.'
           } > reports/trivy.md
 
+          jq -n \
+            --arg scan_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson workflow_run "$GITHUB_RUN_ID" \
+            --arg upstream_ref "$UPSTREAM_REF" \
+            --arg rebuilt_ref "$IMMUTABLE_REF" \
+            --argjson upstream_critical "$(count CRITICAL reports/upstream.json)" \
+            --argjson upstream_high "$(count HIGH reports/upstream.json)" \
+            --argjson upstream_medium "$(count MEDIUM reports/upstream.json)" \
+            --argjson upstream_low "$(count LOW reports/upstream.json)" \
+            --argjson upstream_unknown "$(count UNKNOWN reports/upstream.json)" \
+            --argjson rebuilt_critical "$(count CRITICAL reports/immutable.json)" \
+            --argjson rebuilt_high "$(count HIGH reports/immutable.json)" \
+            --argjson rebuilt_medium "$(count MEDIUM reports/immutable.json)" \
+            --argjson rebuilt_low "$(count LOW reports/immutable.json)" \
+            --argjson rebuilt_unknown "$(count UNKNOWN reports/immutable.json)" \
+            '{
+              scanDate: $scan_date,
+              workflowRun: $workflow_run,
+              upstream: {
+                reference: $upstream_ref,
+                critical: $upstream_critical,
+                high: $upstream_high,
+                medium: $upstream_medium,
+                low: $upstream_low,
+                unknown: $upstream_unknown
+              },
+              rebuilt: {
+                reference: $rebuilt_ref,
+                critical: $rebuilt_critical,
+                high: $rebuilt_high,
+                medium: $rebuilt_medium,
+                low: $rebuilt_low,
+                unknown: $rebuilt_unknown
+              }
+            }' > reports/trivy.json
+
       - name: Commit current Trivy report
         shell: bash
         env:
@@ -267,7 +303,20 @@ jobs:
             exit 0
           fi
           git commit -m 'docs: update Trivy report'
-          git push origin HEAD:main
+          for attempt in 1 2 3; do
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git checkout --theirs reports/trivy.md reports/trivy.json
+              git add reports/trivy.md reports/trivy.json
+              GIT_EDITOR=true git rebase --continue
+            fi
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Report push attempt $attempt lost race; retrying" >&2
+          done
+          echo 'Unable to publish Trivy report after three attempts' >&2
+          exit 1
 
       - name: Write failure metadata
         if: ${{ failure() || cancelled() }}
