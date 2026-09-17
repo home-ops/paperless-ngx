@@ -72,15 +72,23 @@ deferred until `arm64` builds and runtime behavior have been tested.
 
 ## Image Tags
 
-Published tags include:
+Published tags:
 
-- `latest` for the current build
-- `version-timestamp-fullsha` immutable tags, such as
-  `3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567`, combining
-  upstream version, UTC build timestamp, and full source revision
+- `latest`: newest successful build. Mutable.
+- `<version>-<timestamp>-<sha>`: build reference with format
+  `version-YYYYMMDDTHHMMSSZ-<40-character-git-sha>`.
 
-Use the composite immutable tag or image digest when reproducibility matters.
-Treat `latest` as a moving convenience tag.
+Example:
+
+```text
+3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567
+```
+
+Timestamp uses UTC (`Z`). Full SHA identifies source revision. Use full tag plus
+image digest for strongest reproducibility. Timestamped tags are intended to be
+immutable; this depends on registry-side tag protection. The workflow's
+existence check alone is not atomic. `latest` always moves to newest successful
+build.
 
 ## Which Tag Should I Pull?
 
@@ -90,7 +98,7 @@ Choose tag based on need:
 | --- | --- | --- |
 | Quick local testing | `ghcr.io/home-ops/paperless-ngx:latest` | Follows newest successful build. |
 | Non-production tracking | `latest` | Convenient, but changes over time. |
-| Deployment pinning | Full `version-timestamp-fullsha` tag | Identifies exact upstream version, build time, and source revision. |
+| Deployment pinning | Full `version-YYYYMMDDTHHMMSSZ-sha` tag | Identifies exact upstream version, build time, and source revision. |
 | Strongest reproducibility | Immutable tag plus image digest | Digest prevents tag movement from changing pulled content. |
 | Rollback | Previously recorded immutable tag or digest | Restores known image without rebuilding. |
 | Comparing builds | Two immutable tags | Makes Before/After image comparisons repeatable. |
@@ -100,10 +108,12 @@ For example:
 ```sh
 # Convenience pull: moves when newer builds succeed.
 podman pull ghcr.io/home-ops/paperless-ngx:latest
-
-# Reproducible pull: replace example tag with published report value.
-podman pull ghcr.io/home-ops/paperless-ngx:3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567
 ```
+
+For reproducible pulls, copy current `After` image reference from
+[`reports/trivy.md`](reports/trivy.md), or use its digest. Do not copy an old
+example tag: immutable tags identify specific historical builds and may no
+longer be the current report value.
 
 Production deployments should use a full immutable tag or digest, not
 `latest`. The shorter upstream-version and date aliases are not published yet;
