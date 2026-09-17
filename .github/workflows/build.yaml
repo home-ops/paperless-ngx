@@ -115,9 +115,6 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
 
-      - name: Pull immutable image for scanning
-        run: docker pull "$IMMUTABLE_REF"
-
       - name: Scan pinned upstream image
         shell: bash
         run: |
@@ -135,16 +132,6 @@ jobs:
             --exit-code 0 \
             --format json \
             --output reports/upstream.json \
-            "$UPSTREAM_REF"
-          trivy image \
-            --scanners "$TRIVY_SCANNERS" \
-            --severity "$TRIVY_SEVERITY" \
-            --timeout "$TRIVY_TIMEOUT" \
-            --parallel 1 \
-            --exit-code 0 \
-            --format template \
-            --template $'# Trivy vulnerabilities: pinned upstream\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
-            --output reports/upstream.md \
             "$UPSTREAM_REF"
 
       - name: Scan built immutable image
@@ -165,16 +152,6 @@ jobs:
             --format json \
             --output reports/immutable.json \
             "$IMMUTABLE_REF"
-          trivy image \
-            --scanners "$TRIVY_SCANNERS" \
-            --severity "$TRIVY_SEVERITY" \
-            --timeout "$TRIVY_TIMEOUT" \
-            --parallel 1 \
-            --exit-code 0 \
-            --format template \
-            --template $'# Trivy vulnerabilities: built immutable\n\n| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |\n{{- range . }}{{- range .Vulnerabilities }}| {{ .VulnerabilityID }} | {{ .PkgName }} | {{ .InstalledVersion }} | {{ .FixedVersion }} | {{ .Severity }} | {{ .Title }} |\n{{- end }}{{- end }}' \
-            --output reports/immutable.md \
-            "$IMMUTABLE_REF"
 
       - name: Generate vulnerability comparison
         if: ${{ always() }}
@@ -189,6 +166,26 @@ jobs:
             jq --arg severity "$1" \
               '[.Results[]?.Vulnerabilities[]? | select(.Severity == $severity)] | length' "$2"
           }
+
+          details() {
+            jq -r '
+              "| ID | Package | Installed | Fixed | Severity | Title |\n| --- | --- | --- | --- | --- | --- |",
+              (.Results[]?.Vulnerabilities[]? |
+                "| \(.VulnerabilityID) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "") | \(.Severity) | \(.Title // "") |")
+            ' "$1"
+          }
+
+          {
+            echo '# Trivy vulnerabilities: pinned upstream'
+            echo
+            details reports/upstream.json
+          } > reports/upstream.md
+
+          {
+            echo '# Trivy vulnerabilities: built immutable'
+            echo
+            details reports/immutable.json
+          } > reports/immutable.md
 
           {
             echo '# Trivy vulnerability comparison'
