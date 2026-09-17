@@ -104,6 +104,29 @@ The workflow retains report artifacts for 30 days. Vulnerability counts are
 evidence from that specific build and database snapshot, not a guarantee that
 either image is free of vulnerabilities.
 
+## Contributions
+
+Issues and pull requests are welcome. Keep changes focused and explain the
+reason for the change, especially when changing the Dockerfile or workflow.
+
+Before opening a pull request:
+
+- Run `git diff --check`.
+- Validate `renovate.json` as JSON.
+- Validate `.github/workflows/build.yaml` as YAML.
+- Build locally for `linux/amd64` when changing the Dockerfile.
+- Do not add credentials, private infrastructure details, or deployment-specific
+  configuration.
+- Do not edit `reports/trivy.md` manually; GitHub Actions generates it after
+  successful scans.
+
+Renovate handles upstream Paperless-ngx version and digest updates through
+reviewable pull requests. Multi-architecture support is deferred until arm64
+builds and runtime behavior can be tested adequately.
+
+Report security issues privately through GitHub's repository security
+reporting instead of opening a public issue with exploitable details.
+
 ## Local amd64 Commands
 
 Build locally:
