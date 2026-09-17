@@ -292,12 +292,12 @@ jobs:
       - name: Commit current Trivy report
         shell: bash
         env:
-          REPORT_PATH: reports/trivy.md
+          REPORT_PATHS: reports/trivy.md reports/trivy.json
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add "$REPORT_PATH"
+          git add $REPORT_PATHS
           if git diff --cached --quiet; then
             echo 'Trivy report unchanged'
             exit 0
@@ -305,10 +305,19 @@ jobs:
           git commit -m 'docs: update Trivy report'
           for attempt in 1 2 3; do
             git fetch origin main
+            if ! git diff --quiet; then
+              git stash push --include-untracked --message 'generated Trivy reports'
+              stashed=true
+            else
+              stashed=false
+            fi
             if ! git rebase origin/main; then
               git checkout --theirs reports/trivy.md reports/trivy.json
               git add reports/trivy.md reports/trivy.json
               GIT_EDITOR=true git rebase --continue
+            fi
+            if [[ "$stashed" == true ]]; then
+              git stash pop
             fi
             if git push origin HEAD:main; then
               exit 0
