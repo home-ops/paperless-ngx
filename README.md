@@ -51,6 +51,22 @@ The Dockerfile pins the source image by digest. During the image build it runs
 lists. This applies available Debian package upgrades from the source image at
 build time; it does not change the upstream application version.
 
+## Build Frequency and Delays
+
+Scheduled builds run once daily at `04:00 UTC`. The image is not rebuilt
+continuously whenever Debian publishes a package update, so an operating-system
+update can wait up to roughly 24 hours for the next scheduled build. Normal
+GitHub Actions build, scan, report, and publish processing usually adds several
+minutes after the job starts.
+
+Paperless-ngx version or digest updates follow a review path: Renovate opens a
+pull request, and the build starts after that pull request is reviewed and
+merged. Manual workflow dispatch can start an immediate build when needed.
+
+If build, scan, or report publication fails, the existing `latest` tag remains
+unchanged. The previous published image remains available while the failure is
+investigated; successful later runs publish the next update.
+
 Initial builds target `linux/amd64` only. Multi-architecture publishing is
 deferred until `arm64` builds and runtime behavior have been tested.
 
@@ -59,12 +75,40 @@ deferred until `arm64` builds and runtime behavior have been tested.
 Published tags include:
 
 - `latest` for the current build
-- `version-date-fullsha` immutable tags, such as
-  `3.1.3-20260915-0123456789abcdef0123456789abcdef01234567`, combining upstream
-  version, UTC build date, and full source revision
+- `version-timestamp-fullsha` immutable tags, such as
+  `3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567`, combining
+  upstream version, UTC build timestamp, and full source revision
 
 Use the composite immutable tag or image digest when reproducibility matters.
 Treat `latest` as a moving convenience tag.
+
+## Which Tag Should I Pull?
+
+Choose tag based on need:
+
+| Use case | Recommended reference | Reason |
+| --- | --- | --- |
+| Quick local testing | `ghcr.io/home-ops/paperless-ngx:latest` | Follows newest successful build. |
+| Non-production tracking | `latest` | Convenient, but changes over time. |
+| Deployment pinning | Full `version-timestamp-fullsha` tag | Identifies exact upstream version, build time, and source revision. |
+| Strongest reproducibility | Immutable tag plus image digest | Digest prevents tag movement from changing pulled content. |
+| Rollback | Previously recorded immutable tag or digest | Restores known image without rebuilding. |
+| Comparing builds | Two immutable tags | Makes Before/After image comparisons repeatable. |
+
+For example:
+
+```sh
+# Convenience pull: moves when newer builds succeed.
+podman pull ghcr.io/home-ops/paperless-ngx:latest
+
+# Reproducible pull: replace example tag with published report value.
+podman pull ghcr.io/home-ops/paperless-ngx:3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567
+```
+
+Production deployments should use a full immutable tag or digest, not
+`latest`. The shorter upstream-version and date aliases are not published yet;
+they should only be added once their mutable or immutable behavior is defined
+and documented.
 
 ## Updates and Security
 

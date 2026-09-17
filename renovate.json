@@ -2,6 +2,16 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "automerge": false,
+  "packageRules": [
+    {
+      "description": "Automerge Paperless upstream Docker image updates",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/paperless-ngx/paperless-ngx"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    }
+  ],
   "docker": {
     "pinDigests": true
   }

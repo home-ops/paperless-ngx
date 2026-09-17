@@ -66,7 +66,7 @@ jobs:
             echo 'GITHUB_SHA must be exactly 40 lowercase hexadecimal characters' >&2
             exit 1
           fi
-          immutable_tag="${upstream_version}-$(date -u +%Y%m%d)-${GITHUB_SHA}"
+          immutable_tag="${upstream_version}-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA}"
           {
             echo "UPSTREAM_REF=$upstream_ref"
             echo "IMMUTABLE_REF=${IMAGE}:${immutable_tag}"
