@@ -28,6 +28,20 @@ build, update history, and published image remain independently reviewable.
 Initial publication supports `linux/amd64`; multi-architecture support is
 deferred until it can be tested adequately.
 
+## Why This Repository/Image Is Safer
+
+This image is safer than using an unrebuildable, older copy of the upstream
+image because each build starts from a digest-pinned Paperless-ngx image and
+installs current Debian package updates. Renovate proposes upstream version and
+digest changes for review, while immutable version-date-revision tags make each
+published result identifiable and reproducible. GitHub Actions scans the
+upstream image and rebuilt image with the same Trivy configuration and publishes
+the Before/After results in [`reports/trivy.md`](reports/trivy.md). The wrapper
+does not change Paperless-ngx application code or runtime behavior. These
+controls reduce package staleness and improve evidence and traceability, but do
+not guarantee that image has no vulnerabilities or that every runtime risk is
+eliminated.
+
 ## Build Behavior
 
 The Dockerfile pins the source image by digest. During the image build it runs
@@ -58,6 +72,38 @@ changes. Updates are not automerged.
 Vulnerability findings are informational. Build, push, and Trivy scan execution
 failures fail CI.
 
+## Trivy Before/After Reports
+
+Every successful build scans both image references with the same Trivy
+configuration:
+
+- **Before:** pinned upstream Paperless-ngx image.
+- **After:** newly built `ghcr.io/home-ops/paperless-ngx` image.
+
+See the [current visual Before/After report](reports/trivy.md) for latest
+severity totals, changes, image references, and scan run link. GHA regenerates
+that page after every successful scan and commits only the generated report.
+
+View results in the [Build and scan image workflow][workflow]:
+
+1. Open a completed workflow run.
+2. Read the job summary for the severity comparison table.
+3. Download the `trivy-reports-<run-id>` artifact for detailed reports.
+
+Artifacts contain:
+
+```text
+upstream.json       # raw before scan
+upstream.md         # detailed before findings
+immutable.json      # raw after scan
+immutable.md        # detailed after findings
+comparison.md       # severity counts and image references
+```
+
+The workflow retains report artifacts for 30 days. Vulnerability counts are
+evidence from that specific build and database snapshot, not a guarantee that
+either image is free of vulnerabilities.
+
 ## Local amd64 Commands
 
 Build locally:
@@ -72,3 +118,5 @@ Pull the published image:
 ```sh
 docker pull --platform linux/amd64 ghcr.io/home-ops/paperless-ngx:latest
 ```
+
+[workflow]: https://github.com/home-ops/paperless-ngx/actions/workflows/build.yaml
