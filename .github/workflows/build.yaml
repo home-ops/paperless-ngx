@@ -317,7 +317,12 @@ jobs:
 
           for attempt in 1 2 3; do
             head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-            base_tree="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .tree.sha)"
+            # The tree lives on the nested git commit object, not the top level.
+            base_tree="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.commit.tree.sha')"
+            if [[ ! "$base_tree" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Could not read base tree for $head_sha" >&2
+              exit 1
+            fi
 
             md_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.md?ref=main" --jq '.content' | tr -d '\n' || true)"
             json_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.json?ref=main" --jq '.content' | tr -d '\n' || true)"
