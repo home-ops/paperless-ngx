@@ -7,8 +7,6 @@ on:
     paths:
       - Dockerfile
       - renovate.json
-      - README.md
-      - LICENSE
       - .github/workflows/**
   schedule:
     - cron: '0 4 * * *'
@@ -17,10 +15,9 @@ on:
 permissions:
   contents: write
   packages: write
-  pull-requests: write
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.sha }}
+  group: build-${{ github.workflow }}
   cancel-in-progress: false
 
 env:
@@ -298,80 +295,53 @@ jobs:
             --tag "${IMAGE}:latest" \
             "$IMMUTABLE_REF"
 
-      - name: Update Trivy report branch
-        id: report-branch
+      - name: Commit Trivy report to main
         shell: bash
-        env:
-          REPORT_BRANCH: automation/trivy-report
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
+          # Preserve the generated reports across the checkout below.
           report_dir="$RUNNER_TEMP/trivy-report"
           rm -rf "$report_dir"
           mkdir -p "$report_dir"
           cp reports/trivy.md reports/trivy.json "$report_dir/"
-
           git reset --hard HEAD
-          git fetch origin main
-          git fetch origin "$REPORT_BRANCH" || true
-          if git show-ref --verify --quiet "refs/remotes/origin/$REPORT_BRANCH"; then
-            git checkout -B "$REPORT_BRANCH" "origin/$REPORT_BRANCH"
-          else
-            git checkout -B "$REPORT_BRANCH" origin/main
-          fi
 
-          cp "$report_dir/trivy.md" reports/trivy.md
-          cp "$report_dir/trivy.json" reports/trivy.json
-          git add reports/trivy.md reports/trivy.json
-          if git diff --cached --quiet; then
-            echo 'Trivy report unchanged'
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # `main` is unprotected by design, so the report is committed directly.
+          # Retry on races with any other push that lands mid-run.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B main origin/main
 
-          unexpected_files="$(git diff --cached --name-only | grep -vE '^(reports/trivy\.md|reports/trivy\.json)$' || true)"
-          if [[ -n "$unexpected_files" ]]; then
-            echo 'Unexpected files staged for Trivy report update' >&2
-            printf '%s\n' "$unexpected_files" >&2
-            exit 1
-          fi
-          git commit -m 'docs: update Trivy report'
-          git push --force-with-lease origin "HEAD:$REPORT_BRANCH"
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
+            cp "$report_dir/trivy.md" reports/trivy.md
+            cp "$report_dir/trivy.json" reports/trivy.json
+            git add reports/trivy.md reports/trivy.json
 
-      - name: Create or update Trivy report PR
-        if: steps.report-branch.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPORT_BRANCH: automation/trivy-report
-        shell: bash
-        run: |
-          set -euo pipefail
-          existing_pr="$(gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --head "$REPORT_BRANCH" \
-            --base main \
-            --state open \
-            --json number \
-            --jq '.[0].number')"
+            if git diff --cached --quiet; then
+              echo 'Trivy report unchanged'
+              exit 0
+            fi
 
-          if [[ -z "$existing_pr" ]]; then
-            pr_url="$(gh pr create \
-              --repo "$GITHUB_REPOSITORY" \
-              --head "$REPORT_BRANCH" \
-              --base main \
-              --title 'docs: update Trivy report' \
-              --body 'Automated Before/After Trivy report update.')"
-            existing_pr="${pr_url##*/}"
-          fi
+            unexpected_files="$(git diff --cached --name-only | grep -vE '^(reports/trivy\.md|reports/trivy\.json)$' || true)"
+            if [[ -n "$unexpected_files" ]]; then
+              echo 'Unexpected files staged for Trivy report update' >&2
+              printf '%s\n' "$unexpected_files" >&2
+              exit 1
+            fi
 
-          gh pr merge "$existing_pr" \
-            --repo "$GITHUB_REPOSITORY" \
-            --auto \
-            --squash \
-            --delete-branch=false
+            git commit -m 'docs: update Trivy report'
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            echo "Push to main rejected (attempt $attempt); refetching" >&2
+            git reset --hard HEAD~1
+          done
+
+          echo 'Could not push Trivy report to main after 3 attempts' >&2
+          exit 1
 
       - name: Write failure metadata
         if: ${{ failure() || cancelled() }}
