@@ -296,51 +296,63 @@ jobs:
             "$IMMUTABLE_REF"
 
       - name: Commit Trivy report to main
+        # `main` requires verified signatures. A commit made in the runner is
+        # unsigned and would always be rejected, so the commit is created
+        # through the GitHub API, which signs it server-side. The tree contains
+        # only the two report paths, so nothing else can be modified. Retries
+        # handle only a real race: another push landing between our read of
+        # main and our update of it.
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # Preserve the generated reports across the checkout below.
           report_dir="$RUNNER_TEMP/trivy-report"
           rm -rf "$report_dir"
           mkdir -p "$report_dir"
           cp reports/trivy.md reports/trivy.json "$report_dir/"
-          git reset --hard HEAD
 
-          # `main` is unprotected by design, so the report is committed directly.
-          # Retry on races with any other push that lands mid-run.
+          b64() { base64 < "$1" | tr -d '\n'; }
+
           for attempt in 1 2 3; do
-            git fetch origin main
-            git checkout -B main origin/main
+            head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+            base_tree="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .tree.sha)"
 
-            cp "$report_dir/trivy.md" reports/trivy.md
-            cp "$report_dir/trivy.json" reports/trivy.json
-            git add reports/trivy.md reports/trivy.json
-
-            if git diff --cached --quiet; then
+            md_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.md?ref=main" --jq '.content' | tr -d '\n' || true)"
+            json_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.json?ref=main" --jq '.content' | tr -d '\n' || true)"
+            if [[ "$md_current" == "$(b64 "$report_dir/trivy.md")" && "$json_current" == "$(b64 "$report_dir/trivy.json")" ]]; then
               echo 'Trivy report unchanged'
               exit 0
             fi
 
-            unexpected_files="$(git diff --cached --name-only | grep -vE '^(reports/trivy\.md|reports/trivy\.json)$' || true)"
-            if [[ -n "$unexpected_files" ]]; then
-              echo 'Unexpected files staged for Trivy report update' >&2
-              printf '%s\n' "$unexpected_files" >&2
-              exit 1
-            fi
+            tree_payload="$(jq -n \
+              --arg base "$base_tree" \
+              --rawfile md "$report_dir/trivy.md" \
+              --rawfile json "$report_dir/trivy.json" \
+              '{base_tree: $base, tree: [
+                 {path:"reports/trivy.md",  mode:"100644", type:"blob", content:$md},
+                 {path:"reports/trivy.json",mode:"100644", type:"blob", content:$json}]}')"
 
-            git commit -m 'docs: update Trivy report'
-            if git push origin HEAD:main; then
+            new_tree="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/trees" \
+              --input <(printf '%s' "$tree_payload") --jq .sha)"
+
+            commit_sha="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/commits" \
+              -f message='docs: update Trivy report' \
+              -f tree="$new_tree" \
+              -F parents="$head_sha" \
+              --jq .sha)"
+
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" \
+                 -f sha="$commit_sha" --jq .ref > /dev/null 2>&1; then
+              echo "Committed $commit_sha to main"
               exit 0
             fi
 
-            echo "Push to main rejected (attempt $attempt); refetching" >&2
-            git reset --hard HEAD~1
+            echo "main moved during commit (attempt $attempt); refetching" >&2
           done
 
-          echo 'Could not push Trivy report to main after 3 attempts' >&2
+          echo 'Could not commit Trivy report to main after 3 attempts' >&2
           exit 1
 
       - name: Write failure metadata
