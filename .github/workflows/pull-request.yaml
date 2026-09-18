@@ -43,6 +43,10 @@ jobs:
 
       - name: Scan local image
         shell: bash
+        # Findings are informational: the upstream image always carries known
+        # vulnerabilities, so a non-zero exit code here would block every pull
+        # request, including Renovate upstream updates. Trivy execution failures
+        # still fail this step via `set -e`.
         run: |
           set -euo pipefail
           trivy image \
@@ -50,5 +54,5 @@ jobs:
             --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN \
             --timeout 10m \
             --parallel 1 \
-            --exit-code 1 \
+            --exit-code 0 \
             paperless-ngx:pull-request

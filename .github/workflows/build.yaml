@@ -289,6 +289,17 @@ jobs:
               }
             }' > reports/trivy.json
 
+      - name: Update latest after successful build and scans
+        shell: bash
+        # Runs before the report commit: a lost push race on the docs commit
+        # must not prevent a successfully built and scanned image from becoming
+        # `latest`.
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "$IMMUTABLE_REF"
+
       - name: Commit current Trivy report
         shell: bash
         env:
@@ -374,11 +385,3 @@ jobs:
               echo "Reports: [workflow artifacts]($RUN_URL)"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Update latest after successful build and scans
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create \
-            --tag "${IMAGE}:latest" \
-            "$IMMUTABLE_REF"

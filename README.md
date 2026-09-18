@@ -21,7 +21,7 @@ This is a wrapper, not a Paperless-ngx fork:
 - The upstream image remains the application source.
 - Its entrypoint, user, runtime configuration, and application version are preserved.
 - Renovate tracks upstream image releases and digest changes.
-- GitHub Actions publishes reproducible image tags and records Trivy before/after
+- GitHub Actions publishes traceable image tags and records Trivy before/after
   vulnerability results.
 - Vulnerability reports are evidence, not a guarantee that the image is secure.
 
@@ -35,14 +35,19 @@ deferred until it can be tested adequately.
 This image is safer than using an unrebuildable, older copy of the upstream
 image because each build starts from a digest-pinned Paperless-ngx image and
 installs current Debian package updates. Renovate proposes upstream version and
-digest changes for review, while immutable version-date-revision tags make each
-published result identifiable and reproducible. GitHub Actions scans the
-upstream image and rebuilt image with the same Trivy configuration and publishes
-the Before/After results in [`reports/trivy.md`](reports/trivy.md). The wrapper
+digest changes as pull requests that must pass build and scan validation, while
+immutable version-date-revision tags make each published result identifiable
+and traceable. GitHub Actions scans the upstream image and rebuilt image with
+the same Trivy configuration and publishes the Before/After results in
+[`reports/trivy.md`](reports/trivy.md). The wrapper
 does not change Paperless-ngx application code or runtime behavior. These
 controls reduce package staleness and improve evidence and traceability, but do
 not guarantee that image has no vulnerabilities or that every runtime risk is
 eliminated.
+
+Builds are not bit-for-bit reproducible: `apt-get upgrade -y` resolves to
+whatever Debian packages are current at build time. Tags identify exactly which
+source revision and upstream digest produced an image, not a rebuildable result.
 
 ## Build Behavior
 
@@ -59,13 +64,17 @@ update can wait up to roughly 24 hours for the next scheduled build. Normal
 GitHub Actions build, scan, report, and publish processing usually adds several
 minutes after the job starts.
 
-Paperless-ngx version or digest updates follow a review path: Renovate opens a
-pull request, and the build starts after that pull request is reviewed and
-merged. Manual workflow dispatch can start an immediate build when needed.
+Paperless-ngx version or digest updates follow a pull request path: Renovate
+opens a pull request, the pull-request workflow builds and scans the image
+without publishing it, and the update is automerged when that validation passes.
+The publishing build then starts from the merge to `main`. Manual workflow
+dispatch can start an immediate build when needed.
 
-If build, scan, or report publication fails, the existing `latest` tag remains
-unchanged. The previous published image remains available while the failure is
-investigated; successful later runs publish the next update.
+If the build or either scan fails, the existing `latest` tag remains unchanged.
+The previous published image remains available while the failure is
+investigated; successful later runs publish the next update. Report publication
+is intentionally the last step, so a failure to commit `reports/trivy.md` does
+not withhold an image that already built and scanned successfully.
 
 Initial builds target `linux/amd64` only. Multi-architecture publishing is
 deferred until `arm64` builds and runtime behavior have been tested.
@@ -85,10 +94,10 @@ Example:
 ```
 
 Timestamp uses UTC (`Z`). Full SHA identifies source revision. Use full tag plus
-image digest for strongest reproducibility. Timestamped tags are intended to be
-immutable; this depends on registry-side tag protection. The workflow's
-existence check alone is not atomic. `latest` always moves to newest successful
-build.
+image digest for the strongest guarantee that you pull identical content.
+Timestamped tags are intended to be immutable; this depends on registry-side tag
+protection. The workflow's existence check alone is not atomic. `latest` always
+moves to newest successful build.
 
 ## Which Tag Should I Pull?
 
@@ -99,7 +108,7 @@ Choose tag based on need:
 | Quick local testing | `ghcr.io/home-ops/paperless-ngx:latest` | Follows newest successful build. |
 | Non-production tracking | `latest` | Convenient, but changes over time. |
 | Deployment pinning | Full `version-YYYYMMDDTHHMMSSZ-sha` tag | Identifies exact upstream version, build time, and source revision. |
-| Strongest reproducibility | Immutable tag plus image digest | Digest prevents tag movement from changing pulled content. |
+| Strongest pull determinism | Immutable tag plus image digest | Digest prevents tag movement from changing pulled content. |
 | Rollback | Previously recorded immutable tag or digest | Restores known image without rebuilding. |
 | Comparing builds | Two immutable tags | Makes Before/After image comparisons repeatable. |
 
@@ -110,7 +119,7 @@ For example:
 podman pull ghcr.io/home-ops/paperless-ngx:latest
 ```
 
-For reproducible pulls, copy current `After` image reference from
+For deterministic pulls, copy current `After` image reference from
 [`reports/trivy.md`](reports/trivy.md), or use its digest. Do not copy an old
 example tag: immutable tags identify specific historical builds and may no
 longer be the current report value.
@@ -122,11 +131,18 @@ and documented.
 
 ## Updates and Security
 
-The Mend Renovate App proposes dependency and base-image updates as reviewable
-changes. Updates are not automerged.
+The Mend Renovate App proposes dependency and base-image updates as pull
+requests.
 
-Vulnerability findings are informational. Build, push, and Trivy scan execution
-failures fail CI.
+Upstream `ghcr.io/paperless-ngx/paperless-ngx` version and digest updates are
+automerged once the pull-request workflow builds and scans the image
+successfully. These updates publish a new image without human review, which is a
+deliberate tradeoff: it keeps the published image close to upstream, and every
+merge and published tag stays auditable in the commit and workflow history. All
+other updates, including GitHub Actions and workflow changes, remain manual.
+
+Vulnerability findings are informational and never fail a build. Build, push,
+and Trivy *execution* failures fail CI.
 
 ## Trivy Before/After Reports
 
