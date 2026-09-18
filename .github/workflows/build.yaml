@@ -296,68 +296,53 @@ jobs:
             "$IMMUTABLE_REF"
 
       - name: Commit Trivy report to main
-        # `main` requires verified signatures. A commit made in the runner is
-        # unsigned and would always be rejected, so the commit is created
-        # through the GitHub API, which signs it server-side. The tree contains
-        # only the two report paths, so nothing else can be modified. Retries
-        # handle only a real race: another push landing between our read of
-        # main and our update of it.
+        # `main` is committed directly by design. A ruleset enforces
+        # non_fast_forward, so we only ever fast-forward; the required_signatures
+        # rule was removed because GITHUB_TOKEN automation cannot produce a
+        # verified commit (see linked issue). Retries handle a concurrent push
+        # landing between our fetch and our push.
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
           report_dir="$RUNNER_TEMP/trivy-report"
           rm -rf "$report_dir"
           mkdir -p "$report_dir"
           cp reports/trivy.md reports/trivy.json "$report_dir/"
-
-          b64() { base64 < "$1" | tr -d '\n'; }
+          git reset --hard HEAD
 
           for attempt in 1 2 3; do
-            head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-            # The tree lives on the nested git commit object, not the top level.
-            base_tree="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.commit.tree.sha')"
-            if [[ ! "$base_tree" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "Could not read base tree for $head_sha" >&2
-              exit 1
-            fi
+            git fetch origin main
+            git checkout -B main origin/main
 
-            md_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.md?ref=main" --jq '.content' | tr -d '\n' || true)"
-            json_current="$(gh api "repos/$GITHUB_REPOSITORY/contents/reports/trivy.json?ref=main" --jq '.content' | tr -d '\n' || true)"
-            if [[ "$md_current" == "$(b64 "$report_dir/trivy.md")" && "$json_current" == "$(b64 "$report_dir/trivy.json")" ]]; then
+            cp "$report_dir/trivy.md" reports/trivy.md
+            cp "$report_dir/trivy.json" reports/trivy.json
+            git add reports/trivy.md reports/trivy.json
+
+            if git diff --cached --quiet; then
               echo 'Trivy report unchanged'
               exit 0
             fi
 
-            tree_payload="$(jq -n \
-              --arg base "$base_tree" \
-              --rawfile md "$report_dir/trivy.md" \
-              --rawfile json "$report_dir/trivy.json" \
-              '{base_tree: $base, tree: [
-                 {path:"reports/trivy.md",  mode:"100644", type:"blob", content:$md},
-                 {path:"reports/trivy.json",mode:"100644", type:"blob", content:$json}]}')"
+            unexpected_files="$(git diff --cached --name-only | grep -vE '^(reports/trivy\.md|reports/trivy\.json)$' || true)"
+            if [[ -n "$unexpected_files" ]]; then
+              echo 'Unexpected files staged for Trivy report update' >&2
+              printf '%s\n' "$unexpected_files" >&2
+              exit 1
+            fi
 
-            new_tree="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/trees" \
-              --input <(printf '%s' "$tree_payload") --jq .sha)"
-
-            commit_sha="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/commits" \
-              -f message='docs: update Trivy report' \
-              -f tree="$new_tree" \
-              -F parents="$head_sha" \
-              --jq .sha)"
-
-            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" \
-                 -f sha="$commit_sha" --jq .ref > /dev/null 2>&1; then
-              echo "Committed $commit_sha to main"
+            git commit -m 'docs: update Trivy report'
+            if git push origin HEAD:main; then
               exit 0
             fi
 
-            echo "main moved during commit (attempt $attempt); refetching" >&2
+            echo "Push to main rejected (attempt $attempt); refetching" >&2
+            git reset --hard HEAD~1
           done
 
-          echo 'Could not commit Trivy report to main after 3 attempts' >&2
+          echo 'Could not push Trivy report to main after 3 attempts' >&2
           exit 1
 
       - name: Write failure metadata
