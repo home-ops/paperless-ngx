@@ -17,6 +17,7 @@ on:
 permissions:
   contents: write
   packages: write
+  pull-requests: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.sha }}
@@ -291,52 +292,86 @@ jobs:
 
       - name: Update latest after successful build and scans
         shell: bash
-        # Runs before the report commit: a lost push race on the docs commit
-        # must not prevent a successfully built and scanned image from becoming
-        # `latest`.
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "${IMAGE}:latest" \
             "$IMMUTABLE_REF"
 
-      - name: Commit current Trivy report
+      - name: Update Trivy report branch
+        id: report-branch
         shell: bash
         env:
-          REPORT_PATHS: reports/trivy.md reports/trivy.json
+          REPORT_BRANCH: automation/trivy-report
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add $REPORT_PATHS
+
+          report_dir="$RUNNER_TEMP/trivy-report"
+          rm -rf "$report_dir"
+          mkdir -p "$report_dir"
+          cp reports/trivy.md reports/trivy.json "$report_dir/"
+
+          git reset --hard HEAD
+          git fetch origin main
+          git fetch origin "$REPORT_BRANCH" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/$REPORT_BRANCH"; then
+            git checkout -B "$REPORT_BRANCH" "origin/$REPORT_BRANCH"
+          else
+            git checkout -B "$REPORT_BRANCH" origin/main
+          fi
+
+          cp "$report_dir/trivy.md" reports/trivy.md
+          cp "$report_dir/trivy.json" reports/trivy.json
+          git add reports/trivy.md reports/trivy.json
           if git diff --cached --quiet; then
             echo 'Trivy report unchanged'
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          unexpected_files="$(git diff --cached --name-only | grep -vE '^(reports/trivy\.md|reports/trivy\.json)$' || true)"
+          if [[ -n "$unexpected_files" ]]; then
+            echo 'Unexpected files staged for Trivy report update' >&2
+            printf '%s\n' "$unexpected_files" >&2
+            exit 1
+          fi
           git commit -m 'docs: update Trivy report'
-          for attempt in 1 2 3; do
-            git fetch origin main
-            if ! git diff --quiet; then
-              git stash push --include-untracked --message 'generated Trivy reports'
-              stashed=true
-            else
-              stashed=false
-            fi
-            if ! git rebase origin/main; then
-              git checkout --theirs reports/trivy.md reports/trivy.json
-              git add reports/trivy.md reports/trivy.json
-              GIT_EDITOR=true git rebase --continue
-            fi
-            if [[ "$stashed" == true ]]; then
-              git stash pop
-            fi
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            echo "Report push attempt $attempt lost race; retrying" >&2
-          done
-          echo 'Unable to publish Trivy report after three attempts' >&2
-          exit 1
+          git push --force-with-lease origin "HEAD:$REPORT_BRANCH"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Create or update Trivy report PR
+        if: steps.report-branch.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_BRANCH: automation/trivy-report
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing_pr="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$REPORT_BRANCH" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [[ -z "$existing_pr" ]]; then
+            pr_url="$(gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --head "$REPORT_BRANCH" \
+              --base main \
+              --title 'docs: update Trivy report' \
+              --body 'Automated Before/After Trivy report update.')"
+            existing_pr="${pr_url##*/}"
+          fi
+
+          gh pr merge "$existing_pr" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+            --delete-branch=false
 
       - name: Write failure metadata
         if: ${{ failure() || cancelled() }}

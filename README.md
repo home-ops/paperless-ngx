@@ -72,9 +72,10 @@ dispatch can start an immediate build when needed.
 
 If the build or either scan fails, the existing `latest` tag remains unchanged.
 The previous published image remains available while the failure is
-investigated; successful later runs publish the next update. Report publication
-is intentionally the last step, so a failure to commit `reports/trivy.md` does
-not withhold an image that already built and scanned successfully.
+investigated; successful later runs publish the next update. Reports are
+generated in the workflow, uploaded as run artifacts, and submitted to `main`
+through one automatically merged pull request from `automation/trivy-report`.
+The protected branch never receives a direct workflow push.
 
 Initial builds target `linux/amd64` only. Multi-architecture publishing is
 deferred until `arm64` builds and runtime behavior have been tested.
@@ -152,11 +153,12 @@ configuration:
 - **Before:** pinned upstream Paperless-ngx image.
 - **After:** newly built `ghcr.io/home-ops/paperless-ngx` image.
 
-See the [current visual Before/After report](reports/trivy.md) and its
-[normalized JSON data](reports/trivy.json) for latest severity totals, changes,
-image references, and scan run link. GHA regenerates both files after every
-successful scan and commits only these compact reports. Full findings remain in
-the GHA artifact for each run.
+See [`reports/trivy.md`](reports/trivy.md) and its
+[`reports/trivy.json`](reports/trivy.json) companion for latest merged severity
+totals, changes, image references, and scan run link. GHA regenerates both files
+after every scan, updates one report PR, and requests auto-merge. The job
+summary contains the comparison table, while full findings remain in the
+artifact for each run.
 
 View results in the [Build and scan image workflow][workflow]:
 
@@ -191,8 +193,8 @@ Before opening a pull request:
 - Build locally for `linux/amd64` when changing the Dockerfile.
 - Do not add credentials, private infrastructure details, or deployment-specific
   configuration.
-- Do not edit `reports/trivy.md` manually; GitHub Actions generates it after
-  successful scans.
+- Treat `reports/trivy.md` and `reports/trivy.json` as generated files; update
+  them through the automated Trivy report PR rather than editing manually.
 
 Renovate handles upstream Paperless-ngx version and digest updates through
 reviewable pull requests. Multi-architecture support is deferred until arm64
