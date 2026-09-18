@@ -5,7 +5,7 @@ This repository builds a maintained wrapper around the official
 not fork or redistribute Paperless-ngx source code. The Dockerfile starts from
 the official upstream image below and publishes a separately maintained image:
 
-- Source: [`ghcr.io/paperless-ngx/paperless-ngx:3.1.3`](https://github.com/paperless-ngx/paperless-ngx)
+- Source image and pinned version: see [`Dockerfile`](Dockerfile) ([upstream project](https://github.com/paperless-ngx/paperless-ngx))
 - Published image: `ghcr.io/home-ops/paperless-ngx`
 
 ## Why This Repository Exists
