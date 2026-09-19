@@ -4,7 +4,7 @@
 
 **Goal:** Publish an additional Paperless-ngx image variant whose default runtime identity is fixed at UID/GID `1000:1000`, without changing existing image tags.
 
-**Architecture:** Keep existing root-compatible image behavior as default Dockerfile target and add named `nonroot` target with fixed UID/GID `1000:1000`. Pull-request workflow owns non-root runtime validation. Publication workflow builds and loads both variants, scans local images, pushes immutable tags, then updates mutable tags while retaining existing Trivy report semantics. Document fixed UID/GID Kubernetes usage and persistent-volume requirements.
+**Architecture:** Keep existing root-compatible image behavior as default Dockerfile target and add named `nonroot` target with fixed UID/GID `1000:1000`. Pull-request workflow owns non-root runtime validation. Publication workflow keeps root refs under `ghcr.io/home-ops/paperless-ngx`, publishes non-root refs under dedicated package `ghcr.io/home-ops/paperless-ngx-nonroot`, uses same immutable tag format without variant suffix, then updates each package's `latest` tag while retaining existing Trivy report semantics. Document fixed UID/GID Kubernetes usage and persistent-volume requirements.
 
 **Tech Stack:** Dockerfile, Docker Buildx, GitHub Actions, Trivy, shell checks, Kubernetes securityContext documentation.
 
@@ -13,9 +13,9 @@
 ## File Map
 
 - Modify `Dockerfile`: add named `nonroot` build target after existing image definition and set `USER 1000:1000` only in that target.
-- Modify `.github/workflows/build.yaml`: build and load both image variants locally, scan both local images, push immutable tags, preserve report generation, then update mutable tags.
+- Modify `.github/workflows/build.yaml`: define `IMAGE=ghcr.io/home-ops/paperless-ngx` and `NONROOT_IMAGE=ghcr.io/home-ops/paperless-ngx-nonroot`, build and load both image variants locally, scan both package-specific immutable refs, push them, preserve report generation, then update each package's `latest` tag.
 - Modify `.github/workflows/pull-request.yaml`: build and validate non-root variant during pull requests.
-- Modify `README.md`: document non-root tags, immutable references, Kubernetes security context, and volume permissions.
+- Modify `README.md`: document separate root/non-root packages, exact immutable references, Kubernetes security context, and volume permissions.
 - Do not manually edit `reports/trivy.md` or `reports/trivy.json`; workflow generation owns them.
 
 ### Task 1: Add Non-Root Build Target
@@ -92,11 +92,12 @@ git commit -m "ci: validate fixed UID image"
 
 - [ ] **Step 1: Derive separate immutable references**
 
-Retain current immutable reference for existing image. Add non-root reference by appending `-nonroot` to `immutable_tag`:
+Retain current immutable reference for existing image. Derive non-root reference from dedicated package without appending a suffix:
 
 ```sh
 immutable_tag="${upstream_version}-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA}"
-NONROOT_IMMUTABLE_REF="${IMAGE}:${immutable_tag}-nonroot"
+NONROOT_IMAGE=ghcr.io/home-ops/paperless-ngx-nonroot
+NONROOT_IMMUTABLE_REF="${NONROOT_IMAGE}:${immutable_tag}"
 ```
 
 - [ ] **Step 2: Build and load both local images**
@@ -124,7 +125,7 @@ After immutable pushes succeed, update mutable tags:
 
 ```sh
 docker buildx imagetools create --tag "${IMAGE}:latest" "$IMMUTABLE_REF"
-docker buildx imagetools create --tag "${IMAGE}:nonroot" "$NONROOT_IMMUTABLE_REF"
+docker buildx imagetools create --tag "${NONROOT_IMAGE}:latest" "$NONROOT_IMMUTABLE_REF"
 ```
 
 Run shell/YAML validation locally and inspect workflow expressions for quoting, tag collisions, and failure ordering. Ensure failed build, scan, report generation, or immutable push cannot move either mutable tag. Do not repoint `latest` to non-root image.
@@ -143,7 +144,7 @@ git commit -m "ci: publish fixed UID image"
 
 - [ ] **Step 1: Document tags**
 
-Add `nonroot` and immutable non-root tag examples. State that existing `latest` and existing immutable tags retain current behavior.
+Document `ghcr.io/home-ops/paperless-ngx:latest`, `ghcr.io/home-ops/paperless-ngx-nonroot:latest`, and package-specific immutable references without a `-nonroot` suffix. State that existing root-package tags retain current behavior and old same-package `:nonroot` tags are not deleted automatically.
 
 - [ ] **Step 2: Add Kubernetes security context**
 

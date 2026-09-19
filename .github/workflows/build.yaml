@@ -22,6 +22,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/home-ops/paperless-ngx
+  NONROOT_IMAGE: ghcr.io/home-ops/paperless-ngx-nonroot
   TRIVY_SCANNERS: vuln
   TRIVY_SEVERITY: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
   TRIVY_TIMEOUT: 10m
@@ -68,13 +69,13 @@ jobs:
           {
             echo "UPSTREAM_REF=$upstream_ref"
             echo "IMMUTABLE_REF=${IMAGE}:${immutable_tag}"
-            echo "NONROOT_IMMUTABLE_REF=${IMAGE}:${immutable_tag}-nonroot"
+            echo "NONROOT_IMMUTABLE_REF=${NONROOT_IMAGE}:${immutable_tag}"
           } >> "$GITHUB_ENV"
           {
             echo "### Image references"
             echo "- Upstream: \`$upstream_ref\`"
             echo "- Immutable: \`${IMAGE}:${immutable_tag}\`"
-            echo "- Non-root immutable: \`${IMAGE}:${immutable_tag}-nonroot\`"
+            echo "- Non-root immutable: \`${NONROOT_IMAGE}:${immutable_tag}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Reject existing immutable tags
@@ -403,7 +404,7 @@ jobs:
             --tag "${IMAGE}:latest" \
             "$IMMUTABLE_REF"
           docker buildx imagetools create \
-            --tag "${IMAGE}:nonroot" \
+            --tag "${NONROOT_IMAGE}:latest" \
             "$NONROOT_IMMUTABLE_REF"
 
       - name: Commit Trivy report to main

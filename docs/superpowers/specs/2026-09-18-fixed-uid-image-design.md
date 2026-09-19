@@ -10,9 +10,16 @@ support as future work rather than implementing it in this change.
 ## Image Contract
 
 - Existing `latest` and immutable image tags remain unchanged.
-- New `nonroot` tag points to the fixed-UID variant.
-- New immutable non-root tags use the existing version/timestamp/commit format
-  with a `-nonroot` suffix.
+- Root-compatible image references remain under
+  `ghcr.io/home-ops/paperless-ngx`.
+- Fixed-UID image references use dedicated package
+  `ghcr.io/home-ops/paperless-ngx-nonroot`.
+- `ghcr.io/home-ops/paperless-ngx-nonroot:latest` points to newest fixed-UID
+  variant.
+- Immutable non-root tags use existing
+  `version-YYYYMMDDTHHMMSSZ-<40-character-git-sha>` format without suffix, for
+  example `ghcr.io/home-ops/paperless-ngx-nonroot:3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567`.
+- Existing same-package `:nonroot` tags are not deleted automatically.
 - The non-root variant sets Docker `USER 1000:1000`.
 - Existing `/init` entrypoint, application configuration, and volume paths stay
   unchanged.
@@ -34,10 +41,10 @@ generation remains intact, with separate references for each variant.
 
 ## Documentation
 
-README documents the `nonroot` tag, immutable tag form, fixed UID/GID contract,
-Kubernetes security context example, and persistent-volume permission
-requirement. It explicitly states that arbitrary numeric UIDs are not yet
-guaranteed.
+README documents both package names, exact mutable and immutable tag forms,
+fixed UID/GID contract, Kubernetes security context example, and persistent-
+volume permission requirement. It explicitly states that arbitrary numeric UIDs
+are not yet guaranteed.
 
 ## Future Work Issue
 
@@ -48,6 +55,7 @@ criteria. No arbitrary-UID implementation is included in this change.
 
 ## Compatibility
 
-No existing tag changes default user behavior. Consumers needing current root
-startup behavior continue using existing tags; Kubernetes consumers requiring a
-fixed non-root identity use `nonroot` or its immutable equivalent.
+No existing root-package tag changes default user behavior. Consumers needing
+current root startup behavior continue using
+`ghcr.io/home-ops/paperless-ngx:<tag>`; Kubernetes consumers requiring a fixed
+non-root identity use `ghcr.io/home-ops/paperless-ngx-nonroot:<tag>`.
