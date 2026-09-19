@@ -1,4 +1,4 @@
-FROM ghcr.io/paperless-ngx/paperless-ngx:3.1.3@sha256:aa810a36942c63d4ee70d00eda7236cd3d6acfb7eb3f7987fb568ed14df8817a
+FROM ghcr.io/paperless-ngx/paperless-ngx:3.1.3@sha256:aa810a36942c63d4ee70d00eda7236cd3d6acfb7eb3f7987fb568ed14df8817a AS rebuilt
 
 LABEL org.opencontainers.image.source="https://github.com/home-ops/paperless-ngx" \
       org.opencontainers.image.description="Paperless-ngx upstream image rebuilt with current Debian package updates"
@@ -6,3 +6,8 @@ LABEL org.opencontainers.image.source="https://github.com/home-ops/paperless-ngx
 RUN apt-get update \
     && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
+
+FROM rebuilt AS nonroot
+USER 1000:1000
+
+FROM rebuilt

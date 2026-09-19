@@ -88,6 +88,13 @@ Published tags:
 - `latest`: newest successful build. Mutable.
 - `<version>-<timestamp>-<sha>`: build reference with format
   `version-YYYYMMDDTHHMMSSZ-<40-character-git-sha>`.
+- `nonroot`: newest successful non-root build. Mutable.
+- `<version>-<timestamp>-<sha>-nonroot`: non-root build reference with the
+  immutable tag format `version-YYYYMMDDTHHMMSSZ-<40-character-git-sha>-nonroot`.
+
+Existing `latest` and `<version>-<timestamp>-<sha>` tags remain root-run and
+unchanged. The `nonroot` tag is the only mutable non-root tag; use its full
+`-nonroot` form for an immutable non-root reference.
 
 Example:
 
@@ -130,6 +137,30 @@ Production deployments should use a full immutable tag or digest, not
 `latest`. The shorter upstream-version and date aliases are not published yet;
 they should only be added once their mutable or immutable behavior is defined
 and documented.
+
+## Non-root Kubernetes Deployments
+
+Use `nonroot` for tracking the newest non-root build, or a full immutable
+`<version>-<timestamp>-<sha>-nonroot` tag for deployments. Configure Kubernetes
+with the fixed UID and GID contract used by this image:
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+```
+
+Persistent volumes must allow UID/GID `1000:1000` to read and write required
+application data. Existing volume ownership may need to be changed to
+`1000:1000` before starting a non-root deployment. `fsGroup` behavior varies by
+storage backend; some backends, including root-squash/NFS-like storage, require
+ownership to be pre-provisioned or configured through backend-specific
+settings, and may not apply `fsGroup` changes. The image supports this fixed
+UID/GID contract; arbitrary numeric UIDs or GIDs are unsupported and not
+guaranteed to work. See [issue #5](https://github.com/home-ops/paperless-ngx/issues/5)
+for tracking of broader arbitrary-UID support.
 
 ## Updates and Security
 

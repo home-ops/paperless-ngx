@@ -68,50 +68,69 @@ jobs:
           {
             echo "UPSTREAM_REF=$upstream_ref"
             echo "IMMUTABLE_REF=${IMAGE}:${immutable_tag}"
+            echo "NONROOT_IMMUTABLE_REF=${IMAGE}:${immutable_tag}-nonroot"
           } >> "$GITHUB_ENV"
           {
             echo "### Image references"
             echo "- Upstream: \`$upstream_ref\`"
             echo "- Immutable: \`${IMAGE}:${immutable_tag}\`"
+            echo "- Non-root immutable: \`${IMAGE}:${immutable_tag}-nonroot\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Reject existing immutable tag
+      - name: Reject existing immutable tags
         shell: bash
         # This check is advisory only. Registry-side tag immutability is required
         # to make the check-then-push sequence safe against concurrent runs.
         run: |
           set -euo pipefail
-          set +e
-          inspect_output="$(docker manifest inspect "$IMMUTABLE_REF" 2>&1)"
-          inspect_status=$?
-          set -e
-          if [[ $inspect_status -eq 0 ]]; then
-            echo "Immutable tag already exists: $IMMUTABLE_REF" >&2
-            exit 1
-          fi
-          if [[ "$inspect_output" == *'manifest unknown'* ||
-                "$inspect_output" == *'no such manifest'* ||
-                "$inspect_output" == *'name unknown'* ||
-                "$inspect_output" == *'404 Not Found'* ]]; then
-            echo "Immutable tag does not exist: $IMMUTABLE_REF"
-            exit 0
-          fi
-          echo 'Could not determine whether immutable tag exists:' >&2
-          printf '%s\n' "$inspect_output" >&2
-          exit 1
+          check_tag() {
+            local ref="$1"
+            local inspect_output inspect_status
+            set +e
+            inspect_output="$(docker manifest inspect "$ref" 2>&1)"
+            inspect_status=$?
+            set -e
+            if [[ $inspect_status -eq 0 ]]; then
+              echo "Immutable tag already exists: $ref" >&2
+              return 1
+            fi
+            if [[ "$inspect_output" == *'manifest unknown'* ||
+                  "$inspect_output" == *'no such manifest'* ||
+                  "$inspect_output" == *'name unknown'* ||
+                  "$inspect_output" == *'404 Not Found'* ]]; then
+              echo "Immutable tag does not exist: $ref"
+              return 0
+            fi
+            echo "Could not determine whether immutable tag exists: $ref" >&2
+            printf '%s\n' "$inspect_output" >&2
+            return 1
+          }
+          check_tag "$IMMUTABLE_REF"
+          check_tag "$NONROOT_IMMUTABLE_REF"
 
-      - name: Build and publish immutable image
+      - name: Build immutable image
         # Configure GHCR/package tag immutability outside this workflow. A push
         # conflict must fail here; this workflow must not overwrite an immutable tag.
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          load: true
           tags: ${{ env.IMMUTABLE_REF }}
 
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+
+      - name: Build non-root immutable image
+        # Build both variants before either immutable tag is published. Registry
+        # tag immutability still protects the later push from overwrites.
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          target: nonroot
+          load: true
+          tags: ${{ env.NONROOT_IMMUTABLE_REF }}
 
       - name: Scan pinned upstream image
         shell: bash
@@ -151,6 +170,32 @@ jobs:
             --output reports/immutable.json \
             "$IMMUTABLE_REF"
 
+      - name: Scan built non-root immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          trivy_tmpdir="$RUNNER_TEMP/trivy"
+          rm -rf "$trivy_tmpdir"
+          mkdir -p "$trivy_tmpdir"
+          export TMPDIR="$trivy_tmpdir"
+          trivy image \
+            --scanners "$TRIVY_SCANNERS" \
+            --severity "$TRIVY_SEVERITY" \
+            --timeout "$TRIVY_TIMEOUT" \
+            --parallel 1 \
+            --exit-code 0 \
+            --format json \
+            --output reports/nonroot.json \
+            "$NONROOT_IMMUTABLE_REF"
+
+      - name: Publish immutable images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMMUTABLE_REF"
+          docker push "$NONROOT_IMMUTABLE_REF"
+
       - name: Generate vulnerability comparison
         if: ${{ always() }}
         shell: bash
@@ -158,6 +203,11 @@ jobs:
           set -euo pipefail
           if [[ ! -f reports/upstream.json || ! -f reports/immutable.json ]]; then
             exit 0
+          fi
+
+          has_nonroot=false
+          if [[ -f reports/nonroot.json ]]; then
+            has_nonroot=true
           fi
 
           count() {
@@ -185,16 +235,36 @@ jobs:
             details reports/immutable.json
           } > reports/immutable.md
 
+          if [[ "$has_nonroot" == true ]]; then
+            {
+              echo '# Trivy vulnerabilities: built non-root immutable'
+              echo
+              details reports/nonroot.json
+            } > reports/nonroot.md
+          fi
+
           {
             echo '# Trivy vulnerability comparison'
             echo
             echo "Upstream reference: \`$UPSTREAM_REF\`"
             echo "Immutable reference: \`$IMMUTABLE_REF\`"
+            if [[ "$has_nonroot" == true ]]; then
+              echo "Non-root reference: \`$NONROOT_IMMUTABLE_REF\`"
+            fi
             echo
-            echo '| Severity | Pinned upstream | Built immutable |'
-            echo '| --- | ---: | ---: |'
+            if [[ "$has_nonroot" == true ]]; then
+              echo '| Severity | Pinned upstream | Built immutable | Built non-root |'
+              echo '| --- | ---: | ---: | ---: |'
+            else
+              echo '| Severity | Pinned upstream | Built immutable |'
+              echo '| --- | ---: | ---: |'
+            fi
             for severity in CRITICAL HIGH MEDIUM LOW UNKNOWN; do
-              echo "| $severity | $(count "$severity" reports/upstream.json) | $(count "$severity" reports/immutable.json) |"
+              if [[ "$has_nonroot" == true ]]; then
+                echo "| $severity | $(count "$severity" reports/upstream.json) | $(count "$severity" reports/immutable.json) | $(count "$severity" reports/nonroot.json) |"
+              else
+                echo "| $severity | $(count "$severity" reports/upstream.json) | $(count "$severity" reports/immutable.json) |"
+              fi
             done
           } > reports/comparison.md
 
@@ -240,6 +310,9 @@ jobs:
             echo
             echo "- Before: \`$UPSTREAM_REF\`"
             echo "- After: \`$IMMUTABLE_REF\`"
+            if [[ "$has_nonroot" == true ]]; then
+              echo "- Non-root: \`$NONROOT_IMMUTABLE_REF\`"
+            fi
             echo
             echo '## Detailed Reports'
             echo
@@ -247,15 +320,42 @@ jobs:
             echo
             echo '- `upstream.md`: detailed Before findings.'
             echo '- `immutable.md`: detailed After findings.'
+            if [[ "$has_nonroot" == true ]]; then
+              echo '- `nonroot.md`: detailed non-root findings.'
+            fi
             echo '- `comparison.md`: machine-generated severity comparison.'
-            echo '- `upstream.json` and `immutable.json`: raw Trivy output.'
+            if [[ "$has_nonroot" == true ]]; then
+              echo '- `upstream.json`, `immutable.json`, and `nonroot.json`: raw Trivy output.'
+            else
+              echo '- `upstream.json` and `immutable.json`: raw Trivy output.'
+            fi
           } > reports/trivy.md
+
+          nonroot_critical=0
+          nonroot_high=0
+          nonroot_medium=0
+          nonroot_low=0
+          nonroot_unknown=0
+          if [[ "$has_nonroot" == true ]]; then
+            nonroot_critical="$(count CRITICAL reports/nonroot.json)"
+            nonroot_high="$(count HIGH reports/nonroot.json)"
+            nonroot_medium="$(count MEDIUM reports/nonroot.json)"
+            nonroot_low="$(count LOW reports/nonroot.json)"
+            nonroot_unknown="$(count UNKNOWN reports/nonroot.json)"
+          fi
 
           jq -n \
             --arg scan_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --argjson workflow_run "$GITHUB_RUN_ID" \
             --arg upstream_ref "$UPSTREAM_REF" \
             --arg rebuilt_ref "$IMMUTABLE_REF" \
+            --arg nonroot_ref "$NONROOT_IMMUTABLE_REF" \
+            --argjson has_nonroot "$has_nonroot" \
+            --argjson nonroot_critical "$nonroot_critical" \
+            --argjson nonroot_high "$nonroot_high" \
+            --argjson nonroot_medium "$nonroot_medium" \
+            --argjson nonroot_low "$nonroot_low" \
+            --argjson nonroot_unknown "$nonroot_unknown" \
             --argjson upstream_critical "$(count CRITICAL reports/upstream.json)" \
             --argjson upstream_high "$(count HIGH reports/upstream.json)" \
             --argjson upstream_medium "$(count MEDIUM reports/upstream.json)" \
@@ -284,16 +384,27 @@ jobs:
                 medium: $rebuilt_medium,
                 low: $rebuilt_low,
                 unknown: $rebuilt_unknown
+              },
+              nonroot: {
+                reference: $nonroot_ref,
+                critical: $nonroot_critical,
+                high: $nonroot_high,
+                medium: $nonroot_medium,
+                low: $nonroot_low,
+                unknown: $nonroot_unknown
               }
-            }' > reports/trivy.json
+            } | if $has_nonroot then . else del(.nonroot) end' > reports/trivy.json
 
-      - name: Update latest after successful build and scans
+      - name: Update mutable tags after successful builds and scans
         shell: bash
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "${IMAGE}:latest" \
             "$IMMUTABLE_REF"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:nonroot" \
+            "$NONROOT_IMMUTABLE_REF"
 
       - name: Commit Trivy report to main
         # `main` is committed directly by design. A ruleset enforces

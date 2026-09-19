@@ -38,6 +38,147 @@ jobs:
           load: true
           tags: paperless-ngx:pull-request
 
+      - name: Build local non-root image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          target: nonroot
+          push: false
+          load: true
+          tags: paperless-ngx:nonroot-pull-request
+
+      - name: Validate non-root identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id paperless-ngx:pull-request -u)" = 0
+          test "$(docker run --rm --entrypoint id paperless-ngx:pull-request -g)" = 0
+          test "$(docker run --rm --entrypoint id paperless-ngx:nonroot-pull-request -u)" = 1000
+          test "$(docker run --rm --entrypoint id paperless-ngx:nonroot-pull-request -g)" = 1000
+
+      - name: Validate non-root filesystem writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_dir=''
+          media_dir=''
+          consume_dir=''
+          export_dir=''
+          cleanup() {
+            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          }
+          trap cleanup EXIT
+
+          data_dir="$(mktemp -d)"
+          media_dir="$(mktemp -d)"
+          consume_dir="$(mktemp -d)"
+          export_dir="$(mktemp -d)"
+          sudo chown 1000:1000 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+
+          docker run --rm \
+            --entrypoint sh \
+            --user 1000:1000 \
+            --tmpfs /tmp:rw,uid=1000,gid=1000,mode=0700 \
+            --mount "type=bind,src=$data_dir,dst=/usr/src/paperless/data" \
+            --mount "type=bind,src=$media_dir,dst=/usr/src/paperless/media" \
+            --mount "type=bind,src=$consume_dir,dst=/usr/src/paperless/consume" \
+            --mount "type=bind,src=$export_dir,dst=/usr/src/paperless/export" \
+            paperless-ngx:nonroot-pull-request \
+            -c 'for path in /usr/src/paperless/data /usr/src/paperless/media /usr/src/paperless/consume /usr/src/paperless/export /tmp; do file="$path/.nonroot-write-test"; touch "$file"; rm "$file"; done'
+
+      - name: Start non-root image and check HTTP health
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_dir=''
+          media_dir=''
+          consume_dir=''
+          export_dir=''
+          container_id=''
+          redis_id=''
+          network_name="paperless-ci-health-${GITHUB_RUN_ID:-local}"
+          admin_password='ci-health-password'
+          cleanup() {
+            if [[ -n "$container_id" ]]; then
+              docker logs "$container_id" >&2 || true
+              docker rm -f "$container_id" >/dev/null 2>&1 || true
+            fi
+            if [[ -n "$redis_id" ]]; then
+              docker rm -f "$redis_id" >/dev/null 2>&1 || true
+            fi
+            docker network rm "$network_name" >/dev/null 2>&1 || true
+            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          }
+          trap cleanup EXIT
+
+          docker network create "$network_name" >/dev/null
+          redis_id="$(docker run -d --network "$network_name" --network-alias redis redis:7.4-alpine@sha256:520775a41a63e77e06c73e35d2fd9cc15921a609516818796b4ecbb813078bc7)"
+          for attempt in {1..30}; do
+            if docker exec "$redis_id" redis-cli ping 2>/dev/null | grep -qx PONG; then
+              break
+            fi
+            if ! docker inspect -f '{{.State.Running}}' "$redis_id" 2>/dev/null | grep -qx true; then
+              docker logs "$redis_id" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec "$redis_id" redis-cli ping | grep -qx PONG
+
+          data_dir="$(mktemp -d)"
+          media_dir="$(mktemp -d)"
+          consume_dir="$(mktemp -d)"
+          export_dir="$(mktemp -d)"
+          sudo chown 1000:1000 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+
+          container_id="$(docker run -d \
+            --network "$network_name" \
+            --user 1000:1000 \
+            --publish 127.0.0.1:18000:8000 \
+            --tmpfs /tmp:rw,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /run:rw,uid=1000,gid=1000,mode=0700 \
+            --mount "type=bind,src=$data_dir,dst=/usr/src/paperless/data" \
+            --mount "type=bind,src=$media_dir,dst=/usr/src/paperless/media" \
+            --mount "type=bind,src=$consume_dir,dst=/usr/src/paperless/consume" \
+            --mount "type=bind,src=$export_dir,dst=/usr/src/paperless/export" \
+            --env PAPERLESS_DBENGINE=sqlite \
+            --env PAPERLESS_REDIS=redis://redis:6379 \
+            --env PAPERLESS_ADMIN_USER=ci \
+            --env PAPERLESS_ADMIN_PASSWORD="$admin_password" \
+            --env PAPERLESS_ADMIN_MAIL=ci@example.invalid \
+            paperless-ngx:nonroot-pull-request)"
+
+          status='000'
+          for attempt in {1..30}; do
+            if ! docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null | grep -qx true; then
+              echo 'Container exited before becoming healthy' >&2
+              docker logs "$container_id" >&2 || true
+              exit 1
+            fi
+            token="$(curl --silent --show-error --fail --max-time 5 \
+              --header 'Content-Type: application/json' \
+              --data "{\"username\":\"ci\",\"password\":\"$admin_password\"}" \
+              http://127.0.0.1:18000/api/token/ 2>/dev/null | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("token")' 2>/dev/null || true)"
+            if [[ -n "$token" ]]; then
+              response="$(curl --silent --show-error --max-time 5 \
+                --header "Authorization: Token $token" \
+                --write-out $'\n%{http_code}' \
+                http://127.0.0.1:18000/api/status/ || true)"
+              status="${response##*$'\n'}"
+              body="${response%$'\n'*}"
+              if [[ "$status" = 200 ]] && ruby -rjson -e 'data=JSON.parse(STDIN.read); abort unless data.dig("database", "status") == "OK" && data.dig("tasks", "redis_status") == "OK"' <<<"$body"; then
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          echo "HTTP health check timed out; last status: $status; endpoint: /api/status/" >&2
+          docker logs "$container_id" >&2 || true
+          exit 1
+
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
 
@@ -56,3 +197,19 @@ jobs:
             --parallel 1 \
             --exit-code 0 \
             paperless-ngx:pull-request
+
+      - name: Scan non-root image
+        shell: bash
+        # Findings are informational: the upstream image always carries known
+        # vulnerabilities, so a non-zero exit code here would block every pull
+        # request, including Renovate upstream updates. Trivy execution failures
+        # still fail this step via `set -e`.
+        run: |
+          set -euo pipefail
+          trivy image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN \
+            --timeout 10m \
+            --parallel 1 \
+            --exit-code 0 \
+            paperless-ngx:nonroot-pull-request
