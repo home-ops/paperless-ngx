@@ -58,9 +58,10 @@ build time; it does not change the upstream application version.
 
 ## Build Frequency and Delays
 
-Scheduled builds run once daily at `04:00 UTC`. The image is not rebuilt
-continuously whenever Debian publishes a package update, so an operating-system
-update can wait up to roughly 24 hours for the next scheduled build. Normal
+Scheduled builds run four times daily at `00:00`, `06:00`, `12:00`, and `18:00 UTC`.
+The image is not rebuilt continuously whenever Debian publishes a package update,
+so an operating-system update can wait up to roughly 6 hours for the next scheduled
+build. Normal
 GitHub Actions build, scan, report, and publish processing usually adds several
 minutes after the job starts.
 
