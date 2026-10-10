@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,7 +140,6 @@ jobs:
             --user 1000:1000 \
             --publish 127.0.0.1:18000:8000 \
             --tmpfs /tmp:rw,uid=1000,gid=1000,mode=0700 \
-            --tmpfs /run:rw,uid=1000,gid=1000,mode=0700 \
             --mount "type=bind,src=$data_dir,dst=/usr/src/paperless/data" \
             --mount "type=bind,src=$media_dir,dst=/usr/src/paperless/media" \
             --mount "type=bind,src=$consume_dir,dst=/usr/src/paperless/consume" \
