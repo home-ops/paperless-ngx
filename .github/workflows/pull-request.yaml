@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - README.md
       - renovate.json
       - .github/workflows/**
 
@@ -23,6 +24,13 @@ jobs:
         run: |
           set -euo pipefail
           grep -Eq '[0-9]+\.[0-9]+\.[0-9]+-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}' README.md
+
+      - name: Validate documented source vulnerability reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '[`reports/source-vulnerabilities.md`](reports/source-vulnerabilities.md)' README.md
+          grep -Fq '[`reports/source-vulnerabilities.json`](reports/source-vulnerabilities.json)' README.md
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
