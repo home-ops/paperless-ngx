@@ -146,6 +146,7 @@ jobs:
             --mount "type=bind,src=$export_dir,dst=/usr/src/paperless/export" \
             --env PAPERLESS_DBENGINE=sqlite \
             --env PAPERLESS_REDIS=redis://redis:6379 \
+            --env PAPERLESS_SECRET_KEY=ci-only-paperless-secret-key-for-health-check-not-for-production \
             --env PAPERLESS_ADMIN_USER=ci \
             --env PAPERLESS_ADMIN_PASSWORD="$admin_password" \
             --env PAPERLESS_ADMIN_MAIL=ci@example.invalid \
