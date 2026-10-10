@@ -90,7 +90,7 @@ Published tags:
   build. Mutable.
 - `ghcr.io/home-ops/paperless-ngx:<version>-<timestamp>-<sha>`: root-compatible
   build reference with format
-  `version-YYYYMMDDTHHMMSSZ-<40-character-git-sha>`.
+  `version-YYYYMMDDTHHMMSSZ-<12-character-git-sha>`.
 - `ghcr.io/home-ops/paperless-ngx-nonroot:latest`: newest successful fixed-UID
   non-root build. Mutable.
 - `ghcr.io/home-ops/paperless-ngx-nonroot:<version>-<timestamp>-<sha>`:
@@ -109,11 +109,12 @@ and accessible to its `GITHUB_TOKEN` with `packages:write` permission.
 Example:
 
 ```text
-3.1.3-20260915T043012Z-0123456789abcdef0123456789abcdef01234567
+3.1.3-20260915T043012Z-0123456789ab
 ```
 
-Timestamp uses UTC (`Z`). Full SHA identifies source revision. Use full tag plus
-image digest for the strongest guarantee that you pull identical content.
+Timestamp uses UTC (`Z`). The 12-character SHA prefix identifies source revision.
+Use full tag plus image digest for the strongest guarantee that you pull
+identical content.
 Timestamped tags are intended to be immutable; this depends on registry-side tag
 protection. The workflow's existence check alone is not atomic. `latest` always
 moves to newest successful build.
