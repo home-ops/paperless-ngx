@@ -133,7 +133,7 @@ jobs:
           consume_dir="$(mktemp -d)"
           export_dir="$(mktemp -d)"
           sudo chown 1000:1000 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
-          chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          sudo chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
 
           container_id="$(docker run -d \
             --network "$network_name" \
