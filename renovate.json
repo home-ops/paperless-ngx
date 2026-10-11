@@ -4,6 +4,12 @@
   "automerge": false,
   "packageRules": [
     {
+      "matchCategories": [
+        "docker"
+      ],
+      "pinDigests": true
+    },
+    {
       "description": "Automerge Paperless upstream Docker image updates",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/paperless-ngx/paperless-ngx"],
@@ -11,8 +17,5 @@
       "automergeType": "pr",
       "platformAutomerge": true
     }
-  ],
-  "docker": {
-    "pinDigests": true
-  }
+  ]
 }
