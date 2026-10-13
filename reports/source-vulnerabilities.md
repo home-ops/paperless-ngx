@@ -10,7 +10,7 @@ Repositories have different dependency inventories. Counts are descriptive and a
 ## Upstream Paperless-ngx source
 
 Repository: https://github.com/paperless-ngx/paperless-ngx  
-Commit: `6f7ed1d4a7f06c1373b84f8b606fd011e294c4b4`
+Commit: `c4d1b0c7325ea8782d87c64b6738ac39d313df2e`
 
 | Severity | Findings |
 | --- | ---: |
@@ -23,7 +23,7 @@ Commit: `6f7ed1d4a7f06c1373b84f8b606fd011e294c4b4`
 ## Wrapper repository source
 
 Repository: https://github.com/home-ops/paperless-ngx  
-Commit: `d0d2c8ccbb82bebaee794461da628c56182fe9a4`
+Commit: `7cb7165c0108f1a8d170dd43b6eabfef4955047f`
 
 | Severity | Findings |
 | --- | ---: |
