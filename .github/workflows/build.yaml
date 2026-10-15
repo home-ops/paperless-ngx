@@ -517,6 +517,18 @@ jobs:
               }
             } | if $has_nonroot then . else del(.nonroot) end' > reports/trivy.json
 
+      - name: Prepare release notes
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cp reports/trivy.md "$RUNNER_TEMP/release-notes.md"
+          {
+            echo
+            echo "Latest committed comparison: https://github.com/${REPOSITORY}/blob/main/reports/trivy.md"
+          } >> "$RUNNER_TEMP/release-notes.md"
+
       - name: Update mutable tags after successful builds and scans
         shell: bash
         run: |
@@ -581,6 +593,35 @@ jobs:
 
           echo 'Could not push Trivy report to main after 3 attempts' >&2
           exit 1
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_tag="${IMMUTABLE_REF##*:}"
+          if git ls-remote --exit-code origin \
+            "refs/tags/$release_tag" "refs/tags/$release_tag^{}" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$release_tag"
+            remote_commit="$(git rev-parse 'FETCH_HEAD^{}')"
+            if [[ "$remote_commit" != "$GITHUB_SHA" ]]; then
+              echo "Remote tag $release_tag points to $remote_commit, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+          else
+            lookup_status=$?
+            if [[ $lookup_status -ne 2 ]]; then
+              echo "Could not check remote tag $release_tag" >&2
+              exit "$lookup_status"
+            fi
+            git tag "$release_tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$release_tag"
+          fi
+
+          gh release create "$release_tag" \
+            --title "Paperless-ngx $release_tag" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
 
       - name: Write failure metadata
         if: ${{ failure() || cancelled() }}

@@ -8,11 +8,16 @@ the official upstream image below and publishes a separately maintained image:
 - Source image and pinned version: see [`Dockerfile`](Dockerfile) ([upstream project](https://github.com/paperless-ngx/paperless-ngx))
 - Published image: `ghcr.io/home-ops/paperless-ngx`
 
-It provides two practical benefits: rebuilt images include available Debian
-package security updates without waiting for a Paperless-ngx release, and a
-separate image variant runs with fixed UID/GID `1000:1000` for deployments that
-require a non-root container. Each successful build also publishes a transparent
-Trivy comparison against its pinned upstream image.
+The primary benefit is a non-root Paperless-ngx image for deployments that
+require fixed UID/GID `1000:1000`. The image is tested in CI for its runtime
+identity, writable application paths, and HTTP readiness; see
+[Non-root Kubernetes Deployments](#non-root-kubernetes-deployments) for storage
+requirements and configuration.
+
+The root-compatible image also refreshes available Debian packages between
+Paperless-ngx releases. This may reduce OS-package staleness, but does not
+guarantee lower vulnerability counts. See the [Trivy comparison](reports/trivy.md)
+for measured results.
 
 ## Why This Repository Exists
 
@@ -237,6 +242,26 @@ View results in the [Build and scan image workflow][workflow]:
 1. Open a completed workflow run.
 2. Read the job summary for the severity comparison table.
 3. Download the `trivy-reports-<run-id>` artifact for detailed reports.
+
+### See for Yourself
+
+Install Trivy and `jq`, then run these commands from the repository root. Each
+prints severity totals labeled with the image name; image references come from
+`reports/trivy.json`. Trivy uses your local vulnerability database, so counts
+can differ from the committed report as that database changes.
+
+```bash
+set -euo pipefail
+
+# Upstream: ghcr.io/paperless-ngx/paperless-ngx
+trivy image --scanners vuln --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN --exit-code 0 "$(jq -r .upstream.reference reports/trivy.json)" | grep '^Total:' | sed 's/^/upstream: /'
+
+# Rebuilt: ghcr.io/home-ops/paperless-ngx
+trivy image --scanners vuln --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN --exit-code 0 "$(jq -r .rebuilt.reference reports/trivy.json)" | grep '^Total:' | sed 's/^/rebuilt: /'
+
+# Non-root: ghcr.io/home-ops/paperless-ngx-nonroot
+trivy image --scanners vuln --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN --exit-code 0 "$(jq -r .nonroot.reference reports/trivy.json)" | grep '^Total:' | sed 's/^/non-root: /'
+```
 
 Artifacts contain:
 
