@@ -1,4 +1,4 @@
-FROM ghcr.io/paperless-ngx/paperless-ngx:3.3.1@sha256:cb91bfb468e63025a9d10c01b54c33665113668eee61b490db96de19b860b9c4 AS rebuilt
+FROM ghcr.io/paperless-ngx/paperless-ngx:3.3.2@sha256:d232cba37cc0bab0d6c6581ecd320383b7a6f49f33e0fd16adda4d009eb600dd AS rebuilt
 
 LABEL org.opencontainers.image.source="https://github.com/home-ops/paperless-ngx" \
       org.opencontainers.image.description="Paperless-ngx upstream image rebuilt with current Debian package updates"
