@@ -1,5 +1,5 @@
 {
-  "scanDate": "2026-10-16T17:17:08Z",
+  "scanDate": "2026-10-16T20:22:41Z",
   "trivyVersion": "0.76.0",
   "scanner": "vuln",
   "upstream": {
@@ -15,7 +15,7 @@
   },
   "wrapper": {
     "url": "https://github.com/home-ops/paperless-ngx",
-    "commit": "1dc0aafa3856ec74aaedf0a8c5d756e256f9eb85",
+    "commit": "8c70503df0cc4985b92925a4cd500ea0826b2843",
     "severityTotals": {
       "critical": 0,
       "high": 0,
