@@ -15,7 +15,7 @@ Commit: `558cb01a1ddc85b3753d8fcaf5f024e7456a5c82`
 | Severity | Findings |
 | --- | ---: |
 | CRITICAL | 1 |
-| HIGH | 8 |
+| HIGH | 11 |
 | MEDIUM | 3 |
 | LOW | 3 |
 | UNKNOWN | 0 |
@@ -23,7 +23,7 @@ Commit: `558cb01a1ddc85b3753d8fcaf5f024e7456a5c82`
 ## Wrapper repository source
 
 Repository: https://github.com/home-ops/paperless-ngx  
-Commit: `8648a2e52800863541ea1a3f0a740e285cd3aa72`
+Commit: `d373e8fdbd042901e3d21d976d14e582e3b619d9`
 
 | Severity | Findings |
 | --- | ---: |
