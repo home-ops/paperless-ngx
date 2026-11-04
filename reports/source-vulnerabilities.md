@@ -23,7 +23,7 @@ Commit: `b67cfdf3fdfcde4883c4ac136c8545835f679d21`
 ## Wrapper repository source
 
 Repository: https://github.com/home-ops/paperless-ngx  
-Commit: `56edca5c6e6bdf968bda8c1f5a2455e046ca3016`
+Commit: `f3c63083e6fa1b76fc1b07ca4040350131eb9a88`
 
 | Severity | Findings |
 | --- | ---: |
