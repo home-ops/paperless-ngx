@@ -8,9 +8,11 @@ the official upstream image below and publishes a separately maintained image:
 - Source image and pinned version: see [`Dockerfile`](Dockerfile) ([upstream project](https://github.com/paperless-ngx/paperless-ngx))
 - Published image: `ghcr.io/home-ops/paperless-ngx`
 
-The primary benefit is a non-root Paperless-ngx image for deployments that
-require fixed UID/GID `1000:1000`. The image is tested in CI for its runtime
-identity, writable application paths, and HTTP readiness; see
+The primary benefit is a non-root Paperless-ngx image that defaults to UID/GID
+`1000:1000` and supports an overridden arbitrary numeric non-root UID/GID when
+runtime paths and storage permissions are configured. The image is tested in CI
+for an arbitrary runtime identity, persistent-volume-like mounts, document
+processing, and HTTP readiness; see
 [Non-root Kubernetes Deployments](#non-root-kubernetes-deployments) for storage
 requirements and configuration.
 
@@ -60,10 +62,11 @@ vulnerabilities. The wrapper does not change Paperless-ngx application code, and
 scan results are evidence from a particular database snapshot, not a security
 guarantee.
 
-The separate `ghcr.io/home-ops/paperless-ngx-nonroot` image runs with fixed
-UID/GID `1000:1000`, providing a non-root deployment option while preserving the
-upstream-compatible image in `ghcr.io/home-ops/paperless-ngx`. Storage must be
-configured to allow that UID/GID to access application data; see
+The separate `ghcr.io/home-ops/paperless-ngx-nonroot` image defaults to UID/GID
+`1000:1000`, providing a non-root deployment option while preserving the
+upstream-compatible image in `ghcr.io/home-ops/paperless-ngx`. Both images can
+run as an arbitrary numeric non-root UID/GID when storage and runtime paths are
+writable by that identity; see
 [Non-root Kubernetes Deployments](#non-root-kubernetes-deployments).
 
 Builds are not bit-for-bit reproducible: `apt-get upgrade -y` resolves to
@@ -114,10 +117,11 @@ Published tags:
 - `ghcr.io/home-ops/paperless-ngx:<version>-<timestamp>-<sha>`: root-compatible
   build reference with format
   `version-YYYYMMDDTHHMMSSZ-<12-character-git-sha>`.
-- `ghcr.io/home-ops/paperless-ngx-nonroot:latest`: newest successful fixed-UID
-  non-root build. Mutable.
+- `ghcr.io/home-ops/paperless-ngx-nonroot:latest`: newest successful non-root
+  build (default UID/GID `1000:1000`). Mutable.
 - `ghcr.io/home-ops/paperless-ngx-nonroot:<version>-<timestamp>-<sha>`:
-  fixed-UID non-root build reference with the same immutable tag format.
+  non-root build reference with the same immutable tag format (default UID/GID
+  `1000:1000`).
 
 Root-compatible tags remain in `ghcr.io/home-ops/paperless-ngx` and keep their
 existing behavior. Non-root tags are published only in
@@ -175,27 +179,60 @@ and documented.
 
 ## Non-root Kubernetes Deployments
 
-Use `ghcr.io/home-ops/paperless-ngx-nonroot:latest` for tracking the newest
-non-root build, or a full immutable tag from that package for deployments.
-Configure Kubernetes with the fixed UID and GID contract used by this image:
+The `ghcr.io/home-ops/paperless-ngx-nonroot` image defaults to `1000:1000`, but
+both published image packages support overriding that default with any
+non-zero numeric `runAsUser` and `runAsGroup`. The supported contract
+does not require a matching passwd/group entry in the image. CI exercises
+`12345:23456` with supplemental group `34567`, read-only root filesystem,
+dropped capabilities, and `allowPrivilegeEscalation: false`.
+
+Prepare the writable directories used by Paperless—data, media, consume,
+export, and scratch—so the runtime UID/GID can write them. Either provision
+them with ownership matching `runAsUser:runAsGroup`, or make them group-writable
+for `fsGroup` (including setgid on directories where new files must retain the
+group). The scratch path defaults to `/tmp/paperless`; if it is separately
+mounted, set `PAPERLESS_SCRATCH_DIR` to that mount. OCR/font processing also
+needs writable `/var/cache/fontconfig`; with a read-only root filesystem,
+provide writable mounts for `/run` (executable for s6), `/tmp`, and
+`/var/cache/fontconfig`.
+
+For example, the following pod-level and container-level security contexts use
+an arbitrary UID/GID and an `fsGroup`:
 
 ```yaml
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 12345
+    runAsGroup: 23456
+    fsGroup: 34567
+    fsGroupChangePolicy: OnRootMismatch
+  containers:
+    - name: paperless
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
 ```
 
-Persistent volumes must allow UID/GID `1000:1000` to read and write required
-application data. Existing volume ownership may need to be changed to
-`1000:1000` before starting a non-root deployment. `fsGroup` behavior varies by
-storage backend; some backends, including root-squash/NFS-like storage, require
-ownership to be pre-provisioned or configured through backend-specific
-settings, and may not apply `fsGroup` changes. The image supports this fixed
-UID/GID contract; arbitrary numeric UIDs or GIDs are unsupported and not
-guaranteed to work. See [issue #5](https://github.com/home-ops/paperless-ngx/issues/5)
-for tracking of broader arbitrary-UID support.
+Mount writable `emptyDir` volumes at `/run`, `/tmp`, and `/var/cache/fontconfig`
+when using `readOnlyRootFilesystem`; make sure the `/run` mount permits
+execution. Mount and permission the five application paths above as persistent
+volumes or writable volumes as appropriate.
+
+At startup, upstream s6 checks the application directories. A
+`[init-folders] WARNING: No write permission` message means the volume is not
+writable by the effective identity and must be fixed before relying on the
+container. A `Permission issue ... not owned by current user` warning can also
+appear with a working `fsGroup` mount: it reports an ownership mismatch, so
+verify that the effective group has write access. If migrations or processing
+fail with permission errors, inspect the ownership and mode of every mounted
+path and confirm `/run` is writable. Storage backends that do not honor
+`fsGroup`, including some root-squash/NFS-like configurations, must provision
+ownership or ACLs on the server/provisioner; the image cannot repair ownership
+on those volumes. The CI test uses local bind mounts to exercise group-based
+access; it does not certify every CSI or NFS implementation.
 
 ## Updates and Security
 
