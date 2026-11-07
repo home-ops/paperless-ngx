@@ -269,7 +269,7 @@ jobs:
           docker exec "$container_id" /command/with-contenv python3 \
             /usr/src/paperless/src/manage.py document_exporter /usr/src/paperless/export
           docker exec "$container_id" sh -c 'find /usr/src/paperless/export -type f | grep -q .'
-          if docker logs "$container_id" 2>&1 | grep -Fq '[init-folders] WARNING: No write permission'; then
+          if docker logs "$container_id" 2>&1 | grep -F '[init-folders] WARNING: No write permission' >/dev/null; then
             echo 'Paperless reported a non-writable application directory' >&2
             exit 1
           fi
