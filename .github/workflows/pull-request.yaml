@@ -65,8 +65,10 @@ jobs:
           test "$(docker run --rm --entrypoint id paperless-ngx:pull-request -g)" = 0
           test "$(docker run --rm --entrypoint id paperless-ngx:nonroot-pull-request -u)" = 1000
           test "$(docker run --rm --entrypoint id paperless-ngx:nonroot-pull-request -g)" = 1000
+          test "$(docker run --rm --user 12345:23456 --group-add 34567 --entrypoint id paperless-ngx:nonroot-pull-request -u)" = 12345
+          test "$(docker run --rm --user 12345:23456 --group-add 34567 --entrypoint id paperless-ngx:nonroot-pull-request -g)" = 23456
 
-      - name: Validate non-root filesystem writes
+      - name: Validate arbitrary UID filesystem writes
         shell: bash
         run: |
           set -euo pipefail
@@ -74,8 +76,9 @@ jobs:
           media_dir=''
           consume_dir=''
           export_dir=''
+          scratch_dir=''
           cleanup() {
-            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir"
           }
           trap cleanup EXIT
 
@@ -83,21 +86,29 @@ jobs:
           media_dir="$(mktemp -d)"
           consume_dir="$(mktemp -d)"
           export_dir="$(mktemp -d)"
-          sudo chown 1000:1000 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
-          sudo chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          scratch_dir="$(mktemp -d)"
+          sudo chown 0:34567 "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir"
+          sudo chmod 2770 "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir"
 
           docker run --rm \
             --entrypoint sh \
-            --user 1000:1000 \
-            --tmpfs /tmp:rw,uid=1000,gid=1000,mode=0700 \
+            --user 12345:23456 \
+            --group-add 34567 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /run:rw,exec,mode=1777 \
+            --tmpfs /tmp:rw,mode=1777 \
+            --tmpfs /var/cache/fontconfig:rw,mode=1777 \
             --mount "type=bind,src=$data_dir,dst=/usr/src/paperless/data" \
             --mount "type=bind,src=$media_dir,dst=/usr/src/paperless/media" \
             --mount "type=bind,src=$consume_dir,dst=/usr/src/paperless/consume" \
             --mount "type=bind,src=$export_dir,dst=/usr/src/paperless/export" \
+            --mount "type=bind,src=$scratch_dir,dst=/usr/src/paperless/scratch" \
             paperless-ngx:nonroot-pull-request \
-            -c 'for path in /usr/src/paperless/data /usr/src/paperless/media /usr/src/paperless/consume /usr/src/paperless/export /tmp; do file="$path/.nonroot-write-test"; touch "$file"; rm "$file"; done'
+            -c 'for path in /usr/src/paperless/data /usr/src/paperless/media /usr/src/paperless/consume /usr/src/paperless/export /usr/src/paperless/scratch /tmp /run /var/cache/fontconfig; do file="$path/.arbitrary-uid-write-test"; touch "$file"; rm "$file"; done'
 
-      - name: Start non-root image and check HTTP health
+      - name: Start arbitrary UID image and test document processing
         shell: bash
         run: |
           set -euo pipefail
@@ -105,6 +116,8 @@ jobs:
           media_dir=''
           consume_dir=''
           export_dir=''
+          scratch_dir=''
+          fixture_dir=''
           container_id=''
           redis_id=''
           network_name="paperless-ci-health-${GITHUB_RUN_ID:-local}"
@@ -118,7 +131,7 @@ jobs:
               docker rm -f "$redis_id" >/dev/null 2>&1 || true
             fi
             docker network rm "$network_name" >/dev/null 2>&1 || true
-            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+            sudo rm -rf -- "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir" "$fixture_dir"
           }
           trap cleanup EXIT
 
@@ -140,27 +153,70 @@ jobs:
           media_dir="$(mktemp -d)"
           consume_dir="$(mktemp -d)"
           export_dir="$(mktemp -d)"
-          sudo chown 1000:1000 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
-          sudo chmod 0700 "$data_dir" "$media_dir" "$consume_dir" "$export_dir"
+          scratch_dir="$(mktemp -d)"
+          fixture_dir="$(mktemp -d)"
+          sudo chown 0:34567 "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir"
+          sudo chmod 2770 "$data_dir" "$media_dir" "$consume_dir" "$export_dir" "$scratch_dir"
+          PDF_PATH="$fixture_dir/arbitrary-uid-test.pdf" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          objects = [
+              b"<< /Type /Catalog /Pages 2 0 R >>",
+              b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+              b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+              b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+          ]
+          stream = b"BT /F1 40 Tf 72 500 Td (ARBITRARY UID OCR TEST) Tj ET"
+          objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+          pdf = bytearray(b"%PDF-1.4\n")
+          offsets = [0]
+          for number, item in enumerate(objects, 1):
+              offsets.append(len(pdf))
+              pdf.extend(f"{number} 0 obj\n".encode() + item + b"\nendobj\n")
+          xref = len(pdf)
+          pdf.extend(f"xref\n0 {len(offsets)}\n".encode() + b"0000000000 65535 f \n")
+          for offset in offsets[1:]:
+              pdf.extend(f"{offset:010d} 00000 n \n".encode())
+          pdf.extend(
+              f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+              f"startxref\n{xref}\n%%EOF\n".encode()
+          )
+          Path(os.environ["PDF_PATH"]).write_bytes(pdf)
+          PY
+          sudo chown 0:34567 "$fixture_dir"
+          sudo chmod 2750 "$fixture_dir"
 
           container_id="$(docker run -d \
             --network "$network_name" \
-            --user 1000:1000 \
+            --user 12345:23456 \
+            --group-add 34567 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
             --publish 127.0.0.1:18000:8000 \
-            --tmpfs /tmp:rw,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /run:rw,exec,mode=1777 \
+            --tmpfs /tmp:rw,mode=1777 \
+            --tmpfs /var/cache/fontconfig:rw,mode=1777 \
             --mount "type=bind,src=$data_dir,dst=/usr/src/paperless/data" \
             --mount "type=bind,src=$media_dir,dst=/usr/src/paperless/media" \
             --mount "type=bind,src=$consume_dir,dst=/usr/src/paperless/consume" \
             --mount "type=bind,src=$export_dir,dst=/usr/src/paperless/export" \
+            --mount "type=bind,src=$scratch_dir,dst=/usr/src/paperless/scratch" \
+            --mount "type=bind,src=$fixture_dir,dst=/test-fixtures,readonly" \
             --env PAPERLESS_DBENGINE=sqlite \
             --env PAPERLESS_REDIS=redis://redis:6379 \
             --env PAPERLESS_SECRET_KEY=ci-only-paperless-secret-key-for-health-check-not-for-production \
             --env PAPERLESS_ADMIN_USER=ci \
             --env PAPERLESS_ADMIN_PASSWORD="$admin_password" \
             --env PAPERLESS_ADMIN_MAIL=ci@example.invalid \
+            --env PAPERLESS_SCRATCH_DIR=/usr/src/paperless/scratch \
+            --env PAPERLESS_OCR_MODE=force \
+            --env PAPERLESS_CONSUMER_POLLING=1 \
             paperless-ngx:nonroot-pull-request)"
 
           status='000'
+          healthy=false
           for attempt in {1..30}; do
             if ! docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null | grep -qx true; then
               echo 'Container exited before becoming healthy' >&2
@@ -179,14 +235,44 @@ jobs:
               status="${response##*$'\n'}"
               body="${response%$'\n'*}"
               if [[ "$status" = 200 ]] && ruby -rjson -e 'data=JSON.parse(STDIN.read); abort unless data.dig("database", "status") == "OK" && data.dig("tasks", "redis_status") == "OK"' <<<"$body"; then
-                exit 0
+                healthy=true
+                break
               fi
             fi
             sleep 2
           done
-          echo "HTTP health check timed out; last status: $status; endpoint: /api/status/" >&2
-          docker logs "$container_id" >&2 || true
-          exit 1
+          if [[ "$healthy" != true ]]; then
+            echo "HTTP health check timed out; last status: $status; endpoint: /api/status/" >&2
+            docker logs "$container_id" >&2 || true
+            exit 1
+          fi
+
+          docker exec "$container_id" sh -c 'cp /test-fixtures/arbitrary-uid-test.pdf /usr/src/paperless/consume/arbitrary-uid-test.pdf'
+          processed=false
+          for attempt in {1..60}; do
+            if curl --silent --show-error --fail --max-time 5 \
+              --header "Authorization: Token $token" \
+              http://127.0.0.1:18000/api/documents/?page_size=100 |
+              ruby -rjson -e 'abort unless JSON.parse(STDIN.read).fetch("results").any? { |document| document.fetch("content", "").include?("ARBITRARY UID OCR TEST") }'; then
+              processed=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$processed" != true ]]; then
+            echo 'OCR consumption timed out; Paperless did not index the expected text' >&2
+            docker logs "$container_id" >&2 || true
+            exit 1
+          fi
+
+          docker exec "$container_id" sh -c 'find /usr/src/paperless/media/documents/thumbnails -type f | grep -q .'
+          docker exec "$container_id" /command/with-contenv python3 \
+            /usr/src/paperless/src/manage.py document_exporter /usr/src/paperless/export
+          docker exec "$container_id" sh -c 'find /usr/src/paperless/export -type f | grep -q .'
+          if docker logs "$container_id" 2>&1 | grep -F '[init-folders] WARNING: No write permission' >/dev/null; then
+            echo 'Paperless reported a non-writable application directory' >&2
+            exit 1
+          fi
 
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
