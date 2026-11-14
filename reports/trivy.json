@@ -1,28 +1,28 @@
 {
-  "scanDate": "2026-11-13T23:08:46Z",
-  "workflowRun": 43524554507,
+  "scanDate": "2026-11-14T04:29:34Z",
+  "workflowRun": 43556718701,
   "upstream": {
     "reference": "ghcr.io/paperless-ngx/paperless-ngx:3.4.2@sha256:d704e84f88300eb6ab001ab15720a2330ff99169cf9f94d6b8fcc44b63a84c84",
     "critical": 9,
-    "high": 352,
-    "medium": 445,
-    "low": 334,
+    "high": 354,
+    "medium": 448,
+    "low": 335,
     "unknown": 34
   },
   "rebuilt": {
-    "reference": "ghcr.io/home-ops/paperless-ngx:3.4.2-20261113T230641Z-6e0fe98f0af5",
+    "reference": "ghcr.io/home-ops/paperless-ngx:3.4.2-20261114T042733Z-977ca562f1b7",
     "critical": 9,
-    "high": 280,
-    "medium": 422,
-    "low": 330,
+    "high": 282,
+    "medium": 425,
+    "low": 331,
     "unknown": 34
   },
   "nonroot": {
-    "reference": "ghcr.io/home-ops/paperless-ngx-nonroot:3.4.2-20261113T230641Z-6e0fe98f0af5",
+    "reference": "ghcr.io/home-ops/paperless-ngx-nonroot:3.4.2-20261114T042733Z-977ca562f1b7",
     "critical": 9,
-    "high": 280,
-    "medium": 422,
-    "low": 330,
+    "high": 282,
+    "medium": 425,
+    "low": 331,
     "unknown": 34
   }
 }
