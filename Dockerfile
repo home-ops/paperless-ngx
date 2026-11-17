@@ -1,4 +1,4 @@
-FROM ghcr.io/paperless-ngx/paperless-ngx:3.4.2@sha256:d704e84f88300eb6ab001ab15720a2330ff99169cf9f94d6b8fcc44b63a84c84 AS rebuilt
+FROM ghcr.io/paperless-ngx/paperless-ngx:3.5.0@sha256:8c1e2c4e0abb50576c7a09f062ed581e2d955e298a302e1e196a35338639005e AS rebuilt
 
 LABEL org.opencontainers.image.source="https://github.com/home-ops/paperless-ngx" \
       org.opencontainers.image.description="Paperless-ngx rebuilt with current Debian package updates; supports arbitrary non-zero numeric UID/GID when writable paths are prepared" \
